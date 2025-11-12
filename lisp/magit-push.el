@@ -174,12 +174,13 @@ the upstream."
               (not (or (magit-get-upstream-branch branch)
                        (magit--unnamed-upstream-p remote merge)
                        (magit--valid-upstream-p remote merge))))
-      (let* ((branches (-union (--map (concat it "/" branch)
+      (let* ((branches (cl-union (mapcar (##concat % "/" branch)
                                       (magit-list-remotes))
-                               (magit-list-remote-branch-names)))
+                                 (magit-list-remote-branch-names)
+                                 :test #'equal))
              (upstream (magit-completing-read
                         (format "Set upstream of %s and push there" branch)
-                        branches nil nil nil 'magit-revision-history
+                        branches nil 'any nil 'magit-revision-history
                         (or (car (member (magit-remote-branch-at-point) branches))
                             (car (member "origin/master" branches)))))
              (upstream* (or (magit-get-tracked upstream)
