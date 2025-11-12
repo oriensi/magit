@@ -1,9 +1,9 @@
 ;;; magit-bundle.el --- Bundle support for Magit  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
-;; Author: Jonas Bernoulli <jonas@bernoul.li>
-;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
+;; Author: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
+;; Maintainer: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,13 +20,20 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with Magit.  If not, see <https://www.gnu.org/licenses/>.
 
+;;; Commentary:
+
+;; This library implements support for "git bundle".
+;; The entry point is the `magit-bundle' menu command.
+
+;; See (man "git-bundle").
+
 ;;; Code:
 
 (require 'magit)
 
 ;;; Commands
 
-;;;###autoload (autoload 'magit-bundle "magit-bundle" nil t)
+;;;###autoload(autoload 'magit-bundle "magit-bundle" nil t)
 (transient-define-prefix magit-bundle ()
   "Create or verify Git bundles."
   :man-page "git-bundle"
@@ -35,7 +42,7 @@
    ("v" "verify"     magit-bundle-verify)
    ("l" "list-heads" magit-bundle-list-heads)])
 
-;;;###autoload (autoload 'magit-bundle-import "magit-bundle" nil t)
+;;;###autoload(autoload 'magit-bundle-import "magit-bundle" nil t)
 (transient-define-prefix magit-bundle-create (&optional file refs args)
   "Create a bundle."
   :man-page "git-bundle"
@@ -92,7 +99,7 @@
 ;;;###autoload
 (defun magit-bundle-update-tracked (tag)
   "Update a bundle that is being tracked using TAG."
-  (interactive (list (magit-read-tag "Update bundle tracked by tag" t)))
+  (interactive (list (magit-read-tag "Update bundle tracked by tag")))
   (let (msg)
     (let-alist (magit--with-temp-process-buffer
                  (save-excursion
@@ -129,4 +136,15 @@
 
 ;;; _
 (provide 'magit-bundle)
+;; Local Variables:
+;; read-symbol-shorthands: (
+;;   ("and$"         . "cond-let--and$")
+;;   ("and>"         . "cond-let--and>")
+;;   ("and-let"      . "cond-let--and-let")
+;;   ("if-let"       . "cond-let--if-let")
+;;   ("when-let"     . "cond-let--when-let")
+;;   ("while-let"    . "cond-let--while-let")
+;;   ("match-string" . "match-string")
+;;   ("match-str"    . "match-string-no-properties"))
+;; End:
 ;;; magit-bundle.el ends here

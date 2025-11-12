@@ -9,18 +9,13 @@ all: lisp
 
 ## Build order #######################################################
 
-git-commit.elc:
 magit-section.elc:
 magit-base.elc:            magit-section.elc
-ifeq "$(BUILD_MAGIT_LIBGIT)" "true"
-magit-libgit.elc:
-magit-git.elc:             magit-base.elc magit-libgit.elc
-else
 magit-git.elc:             magit-base.elc
-endif
 magit-mode.elc:            magit-base.elc magit-git.elc
 magit-margin.elc:          magit-base.elc magit-mode.elc
 magit-process.elc:         magit-base.elc magit-git.elc magit-mode.elc
+git-commit.elc:            magit-git.elc magit-mode.elc magit-process.elc
 magit-transient.elc:       magit-git.elc magit-mode.elc magit-process.elc
 magit-autorevert.elc:      magit-git.elc magit-process.elc
 magit-core.elc:            magit-base.elc magit-git.elc magit-mode.elc \
@@ -61,13 +56,14 @@ magit-gitignore.elc:       magit.elc
 magit-sparse-checkout.elc: magit.elc
 magit-bundle.elc:          magit.elc
 magit-extras.elc:          magit.elc magit-merge.elc
+magit-dired.elc:           magit.elc
 git-rebase.elc:            magit.elc
 magit-bookmark.elc:        magit.elc
 
 ## Build #############################################################
 
-lisp:       $(ELCS) loaddefs $(LISP_EXTRA_TARGETS)
-loaddefs:   $(PKG)-autoloads.el
+lisp:       $(ELCS) autoloads $(LISP_EXTRA_TARGETS)
+autoloads:   $(PKG)-autoloads.el
 versionlib: $(PKG)-version.el
 
 %.elc: %.el
@@ -76,22 +72,21 @@ versionlib: $(PKG)-version.el
 	(when (file-exists-p \"$@\")\
 	  (delete-file \"$@\"))\
 	(setq with-editor-emacsclient-executable nil)\
-	$$suppress_warnings)" \
+	(when (< emacs-major-version 30)\
+	  (require 'transient)))" \
 	-f batch-byte-compile $<
 
 $(PKG)-autoloads.el: $(ELS)
 	@printf " Creating $@\n"
-	@$(EMACS) -Q --batch -l autoload -l cl-lib --eval "\
-(let ((file (expand-file-name \"$@\"))\
-      (autoload-timestamps nil) \
-      (backup-inhibited t)\
-      (version-control 'never)\
-      (coding-system-for-write 'utf-8-emacs-unix))\
-  (write-region (autoload-rubric file \"package\" nil) nil file nil 'silent)\
-  (cl-letf (((symbol-function 'progress-reporter-do-update) (lambda (&rest _)))\
-            ((symbol-function 'progress-reporter-done) (lambda (_))))\
-    (let ((generated-autoload-file file))\
-      (update-directory-autoloads default-directory))))" \
+	@$(EMACS) -Q --batch -l autoload --eval "\
+(let* ((file (expand-file-name \"$@\"))\
+       (generated-autoload-file file)\
+       (coding-system-for-write 'utf-8-emacs-unix)\
+       (backup-inhibited t)\
+       (version-control 'never)\
+       (inhibit-message t))\
+  (write-region (autoload-rubric file \"package\" t) nil file)\
+  (update-directory-autoloads default-directory))" \
 	2>&1 | sed "/^Package autoload is deprecated$$/d"
 
 $(PKG)-version.el:
@@ -114,11 +109,12 @@ install: lisp versionlib
 clean:
 	@printf " Cleaning lisp/*...\n"
 	@$(RM) *.elc $(ELGS)
+	@$(RM) ../test/magit-tests.elc
 
 ## Templates #########################################################
 
 define VERSIONLIB_TMPL
-;;; $(PKG)-version.el --- the Magit version you are using
+;;; $(PKG)-version.el --- The Magit version you are using  -*- lexical-binding:t -*-
 
 (setq $(PKG)-version "$(VERSION)")
 
@@ -135,15 +131,3 @@ define VERSIONLIB_TMPL
 endef
 export VERSIONLIB_TMPL
 #'
-
-define suppress_warnings
-(fset 'original-message (symbol-function 'message))
-(fset 'message ;'
-      (lambda (f &rest a)
-        (unless (or (equal f "Wrote %s")
-                    (equal f "pcase-memoize: equal first branch, yet different")
-                    (and (equal f "Warning: Unknown defun property `%S' in %S")
-                         (memq (car a) '(pure side-effect-free interactive-only))))
-          (apply 'original-message f a))))
-endef
-export suppress_warnings

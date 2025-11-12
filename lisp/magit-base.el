@@ -1,9 +1,9 @@
 ;;; magit-base.el --- Early birds  -*- lexical-binding:t; coding:utf-8 -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
-;; Author: Jonas Bernoulli <jonas@bernoul.li>
-;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
+;; Author: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
+;; Maintainer: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -32,20 +32,22 @@
 
 ;;; Code:
 
-(defconst magit--minimal-git "2.2.0")
-(defconst magit--minimal-emacs "25.1")
+;; Also update EMACS_VERSION in "default.mk".
+(defconst magit--minimal-emacs "28.1")
+(defconst magit--minimal-git "2.25.0")
 
 (require 'cl-lib)
 (require 'compat)
-(require 'dash)
+(require 'cond-let)
 (require 'eieio)
+(require 'llama) ; For (##these ...) see M-x describe-function RET # # RET.
 (require 'subr-x)
 
 ;; For older Emacs releases we depend on an updated `seq' release from
 ;; GNU ELPA, for `seq-keep'.  Unfortunately something else may already
 ;; have required `seq', before `package' had a chance to put the more
 ;; recent version earlier on the `load-path'.
-(when (and (featurep' seq)
+(when (and (featurep 'seq)
            (not (fboundp 'seq-keep)))
   (unload-feature 'seq 'force))
 (require 'seq)
@@ -54,7 +56,7 @@
 
 (require 'magit-section)
 
-(eval-when-compile (require 'ido))
+(eval-when-compile (require 'info))
 (declare-function Info-get-token "info" (pos start all &optional errorstring))
 
 (eval-when-compile (require 'vc-git))
@@ -68,26 +70,23 @@
 (defcustom magit-completing-read-function #'magit-builtin-completing-read
   "Function to be called when requesting input from the user.
 
-If you have enabled `ivy-mode' or `helm-mode', then you don't
-have to customize this option; `magit-builtin-completing-read'
-will work just fine.  However, if you use Ido completion, then
-you do have to use `magit-ido-completing-read', because Ido is
-less well behaved than the former, more modern alternatives.
+The default, `magit-builtin-completing-read', support third-party
+completion frameworks, including `vertico-mode', `ivy-mode' and
+`helm-mode'.
 
-If you would like to use Ivy or Helm completion with Magit but
-not enable the respective modes globally, then customize this
-option to use `ivy-completing-read' or
-`helm--completing-read-default'.  If you choose to use
-`ivy-completing-read', note that the items may always be shown in
-alphabetical order, depending on your version of Ivy."
+However, if you would like to use Ivy or Helm completion with Magit but
+not enable the respective modes globally, then customize this option to
+use `ivy-completing-read' or `helm--completing-read-default'.
+
+If you still use `ido-mode', you'll likely need the `magit-ido' package."
   :group 'magit-essentials
-  :type '(radio (function-item magit-builtin-completing-read)
-                (function-item magit-ido-completing-read)
+  :type `(radio (function-item ,#'magit-builtin-completing-read)
                 (function-item ivy-completing-read)
                 (function-item helm--completing-read-default)
                 (function :tag "Other function")))
 
 (defcustom magit-dwim-selection
+  ;; Do not function-quote to avoid circular dependencies.
   '((magit-stash-apply        nil t)
     (magit-ediff-resolve-all  nil t)
     (magit-ediff-resolve-rest nil t)
@@ -127,11 +126,11 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
   :group 'magit-commands
   :type '(repeat
           (list (symbol :tag "Command") ; It might not be fboundp yet.
-                (choice (const  :tag "for all prompts" nil)
-                        (regexp :tag "for prompts matching regexp"))
-                (choice (const  :tag "offer other choices" nil)
-                        (const  :tag "require confirmation" ask)
-                        (const  :tag "use default without confirmation" t)))))
+                (choice (const  :tag "For all prompts" nil)
+                        (regexp :tag "For prompts matching regexp"))
+                (choice (const  :tag "Offer other choices" nil)
+                        (const  :tag "Require confirmation" ask)
+                        (const  :tag "Use default without confirmation" t)))))
 
 (defconst magit--confirm-actions
   '((const discard)
@@ -144,6 +143,8 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
     (const untrack)
     (const rename)
     (const reset-bisect)
+    (const abort-cherry-pick)
+    (const abort-revert)
     (const abort-rebase)
     (const abort-merge)
     (const merge-dirty)
@@ -210,6 +211,13 @@ Sequences:
 
   `reset-bisect' Aborting (known to Git as \"resetting\") a
   bisect operation loses all information collected so far.
+
+  `abort-cherry-pick' Aborting a cherry-pick throws away all
+  conflict resolutions which has already been carried out by the
+  user.
+
+  `abort-revert' Aborting a revert throws away all conflict
+  resolutions which has already been carried out by the user.
 
   `abort-rebase' Aborting a rebase throws away all already
   modified commits, but it's possible to restore those from the
@@ -325,11 +333,11 @@ Global settings:
   for confirmation for any of these actions, you are still better
   of adding all of the respective symbols individually.
 
-  When `magit-wip-before-change-mode' is enabled then these actions
-  can fairly easily be undone: `discard', `reverse',
-  `stage-all-changes', and `unstage-all-changes'.  If and only if
-  this mode is enabled, then `safe-with-wip' has the same effect
-  as adding all of these symbols individually."
+  When `magit-wip-mode' is enabled then these actions can fairly
+  easily be undone: `discard', `reverse', `stage-all-changes', and
+  `unstage-all-changes'.  If and only if this mode is enabled, then
+  `safe-with-wip' has the same effect as adding all of these symbols
+  individually."
   :package-version '(magit . "2.1.0")
   :group 'magit-essentials
   :group 'magit-commands
@@ -418,7 +426,7 @@ the ellipsis definition.  Currently the only acceptable values
 for WHERE are `margin' or t (representing the default).
 
 Whether collapsed sections are indicated using ellipsis is
-controlled by `magit-section-visibility-indicator'."
+controlled by option `magit-section-visibility-indicators'."
   :package-version '(magit . "4.0.0")
   :group 'magit-miscellaneous
   :type '(repeat (list (symbol :tag "Where")
@@ -456,42 +464,53 @@ and delay of your graphical environment or operating system."
 `woman' View the respective man-page using the `woman' package."
   :package-version '(magit . "2.9.0")
   :group 'magit-miscellaneous
-  :type '(choice (const :tag "view info manual" info)
-                 (const :tag "view manpage using `man'" man)
-                 (const :tag "view manpage using `woman'" woman)))
+  :type '(choice (const :tag "View info manual" info)
+                 (const :tag "View manpage using `man'" man)
+                 (const :tag "View manpage using `woman'" woman)))
 
 ;;; Section Classes
 
-(defclass magit-commit-section (magit-section) ())
+(defclass magit-commit-section (magit-section)
+  ((keymap :initform 'magit-commit-section-map)))
 
 (setf (alist-get 'commit magit--section-type-alist) 'magit-commit-section)
 
-(defclass magit-diff-section (magit-section) () :abstract t)
+(defclass magit-diff-section (magit-section)
+  ((keymap :initform 'magit-diff-section-map))
+  :abstract t)
 
 (defclass magit-file-section (magit-diff-section)
   ((keymap :initform 'magit-file-section-map)
-   (source :initform nil)
-   (header :initform nil)
-   (binary :initform nil)))
+   (source :initform nil :initarg :source)
+   (header :initform nil :initarg :header)
+   (binary :initform nil :initarg :binary)
+   (heading-highlight-face :initform 'magit-diff-file-heading-highlight)
+   (heading-selection-face :initform 'magit-diff-file-heading-selection)))
 
 (defclass magit-module-section (magit-file-section)
   ((keymap :initform 'magit-module-section-map)
-   (range  :initform nil)))
+   (range  :initform nil :initarg :range)))
 
 (defclass magit-hunk-section (magit-diff-section)
   ((keymap      :initform 'magit-hunk-section-map)
+   (painted     :initform nil)
+   (fontified   :initform nil) ;TODO
    (refined     :initform nil)
-   (combined    :initform nil)
-   (from-range  :initform nil)
+   (combined    :initform nil :initarg :combined)
+   (from-range  :initform nil :initarg :from-range)
    (from-ranges :initform nil)
-   (to-range    :initform nil)
-   (about       :initform nil)))
+   (to-range    :initform nil :initarg :to-range)
+   (about       :initform nil :initarg :about)
+   (heading-highlight-face :initform 'magit-diff-hunk-heading-highlight)
+   (heading-selection-face :initform 'magit-diff-hunk-heading-selection)))
 
 (setf (alist-get 'file   magit--section-type-alist) 'magit-file-section)
 (setf (alist-get 'module magit--section-type-alist) 'magit-module-section)
 (setf (alist-get 'hunk   magit--section-type-alist) 'magit-hunk-section)
 
-(defclass magit-log-section (magit-section) () :abstract t)
+(defclass magit-log-section (magit-section)
+  ((keymap :initform 'magit-log-section-map))
+  :abstract t)
 (defclass magit-unpulled-section (magit-log-section) ())
 (defclass magit-unpushed-section (magit-log-section) ())
 (defclass magit-unmerged-section (magit-log-section) ())
@@ -506,8 +525,28 @@ and delay of your graphical environment or operating system."
 (defvar helm-crm-default-separator)
 (defvar ivy-sort-functions-alist)
 (defvar ivy-sort-matches-functions-alist)
+(defvar vertico-sort-function)
 
 (defvar magit-completing-read--silent-default nil)
+
+(defvar magit-completing-read-default-prompt-predicate
+  (lambda ()
+    (and (eq magit-completing-read-function
+             'magit-builtin-completing-read)
+         (not (or (bound-and-true-p helm-mode)
+                  (bound-and-true-p ivy-mode)
+                  (bound-and-true-p selectrum-mode)
+                  (bound-and-true-p vertico-mode)))))
+  "Function used to determine whether to add default to prompt.
+
+This is used by `magit-completing-read' (which see).
+
+The default function returns nil, when a completion frameworks is used
+for which this is undesirable.  More precisely, it returns nil, when
+`magit-completing-read-function' is not `magit-builtin-completing-read',
+or one of `helm-mode', `ivy-mode', `selectrum-mode' or `vertico-mode'
+is enabled.  When this function returns nil, then nil is passed to
+`format-prompt' (which see), instead of the default (DEF or FALLBACK).")
 
 (defun magit-completing-read ( prompt collection &optional
                                predicate require-match initial-input
@@ -539,6 +578,10 @@ acts similarly to `completing-read', except for the following:
 - If REQUIRE-MATCH is nil and the user exits without a choice,
   then nil is returned instead of an empty string.
 
+- If REQUIRE-MATCH is `any', then do not require a match but
+  do require non-empty input (or non-nil DEFAULT, since that
+  is substituted for empty input).
+
 - If REQUIRE-MATCH is non-nil and the user exits without a
   choice, `user-error' is raised.
 
@@ -548,20 +591,19 @@ acts similarly to `completing-read', except for the following:
   is not, then this function always asks the user to choose a
   candidate, just as if both defaults were nil.
 
-- \": \" is appended to PROMPT.
-
-- PROMPT is modified to end with \" (default DEF|FALLBACK): \"
-  provided that DEF or FALLBACK is non-nil, that neither
-  `ivy-mode' nor `helm-mode' is enabled, and that
-  `magit-completing-read-function' is set to its default value of
-  `magit-builtin-completing-read'."
+- `format-prompt' is called on PROMPT and DEF (or FALLBACK if
+  DEF is nil).  This appends \": \" to the prompt and may also
+  add the default to the prompt, using the format specified by
+  `minibuffer-default-prompt-format' and depending on
+  `magit-completing-read-default-prompt-predicate'."
   (setq magit-completing-read--silent-default nil)
-  (if-let ((dwim (and def
-                      (nth 2 (seq-find (pcase-lambda (`(,cmd ,re ,_))
-                                         (and (eq this-command cmd)
-                                              (or (not re)
-                                                  (string-match-p re prompt))))
-                                       magit-dwim-selection)))))
+  (if-let ((_ def)
+           (dwim (seq-some (pcase-lambda (`(,cmd ,re ,dwim))
+                             (and (eq cmd this-command)
+                                  (or (not re)
+                                      (string-match-p re prompt))
+                                  dwim))
+                           magit-dwim-selection)))
       (if (eq dwim 'ask)
           (if (y-or-n-p (format "%s %s? " prompt def))
               def
@@ -570,21 +612,32 @@ acts similarly to `completing-read', except for the following:
         def)
     (unless def
       (setq def fallback))
+    (when (and def
+               (not (functionp collection))
+               (not (member def collection)))
+      (setq collection (cons def collection)))
     (let ((command this-command)
           (reply (funcall magit-completing-read-function
-                          (concat prompt ": ")
-                          (if (and def (not (member def collection)))
-                              (cons def collection)
-                            collection)
-                          predicate
-                          require-match initial-input hist def)))
+                          (magit--format-prompt prompt def)
+                          collection predicate
+                          (if (eq require-match 'any) nil require-match)
+                          initial-input hist def)))
       (setq this-command command)
       ;; Note: Avoid `string=' to support `helm-comp-read-use-marked'.
       (if (equal reply "")
-          (if require-match
+          (if (and require-match
+                   (not (and (listp collection)
+                             (member "" collection))))
               (user-error "Nothing selected")
             nil)
         reply))))
+
+(defun magit--format-prompt (prompt default)
+  (format-prompt (if (string-suffix-p ": " prompt)
+                     (substring prompt 0 -2)
+                   prompt)
+                 (and (funcall magit-completing-read-default-prompt-predicate)
+                      default)))
 
 (defun magit--completion-table (collection)
   (lambda (string pred action)
@@ -596,21 +649,17 @@ acts similarly to `completing-read', except for the following:
     (prompt choices &optional predicate require-match initial-input hist def)
   "Magit wrapper for standard `completing-read' function."
   (unless (or (bound-and-true-p helm-mode)
-              (bound-and-true-p ivy-mode)
-              (bound-and-true-p vertico-mode)
-              (bound-and-true-p selectrum-mode))
-    (setq prompt (magit-prompt-with-default prompt def)))
-  (unless (or (bound-and-true-p helm-mode)
               (bound-and-true-p ivy-mode))
     (setq choices (magit--completion-table choices)))
-  (cl-letf (((symbol-function #'completion-pcm--all-completions)))
-    (when (< emacs-major-version 26)
-      (fset 'completion-pcm--all-completions
-            'magit-completion-pcm--all-completions))
-    (let ((ivy-sort-functions-alist nil))
-      (completing-read prompt choices
-                       predicate require-match
-                       initial-input hist def))))
+  (let ((ivy-sort-functions-alist nil))
+    (completing-read prompt
+                     (lambda (str pred action)
+                       (if (eq action 'metadata)
+                           '(metadata (display-sort-function . identity)
+                                      (cycle-sort-function . identity))
+                         (complete-with-action action choices str pred)))
+                     predicate require-match
+                     initial-input hist def)))
 
 (define-obsolete-function-alias 'magit-completing-read-multiple*
   'magit-completing-read-multiple "Magit-Section 4.0.0")
@@ -640,12 +689,14 @@ third-party completion frameworks."
                      (equal omit-nulls t))
             (setq input string))
           (funcall split-string string separators omit-nulls trim)))
-       ;; In Emacs 25 this function has a bug, so we use a copy of the
-       ;; version from Emacs 26. bef9c7aa3
-       ((symbol-function #'completion-pcm--all-completions)
-        (if (< emacs-major-version 26)
-            'magit-completion-pcm--all-completions
-          (symbol-function #'completion-pcm--all-completions)))
+       ;; Add the default to the table if absent, which is necessary
+       ;; because we don't add it to the prompt for some frameworks.
+       (table (if (and def
+                       (listp table)
+                       (not (listp (car table)))
+                       (not (member def table)))
+                  (cons def table)
+                table))
        ;; Prevent `BUILT-IN' completion from messing up our existing
        ;; order of the completion candidates. aa5f098ab
        (table (magit--completion-table table))
@@ -660,36 +711,14 @@ third-party completion frameworks."
         (if no-split nil (bound-and-true-p helm-crm-default-separator)))
        ;; And now, the moment we have all been waiting for...
        (values (completing-read-multiple
-                prompt table predicate require-match initial-input
-                hist def inherit-input-method)))
+                (magit--format-prompt prompt def)
+                table predicate
+                (if (eq require-match 'any) nil require-match)
+                initial-input hist def inherit-input-method)))
+    (when (and (eq require-match 'any)
+               (not values))
+      (user-error "Nothing selected"))
     (if no-split input values)))
-
-(defun magit-ido-completing-read
-    (prompt choices &optional predicate require-match initial-input hist def)
-  "Ido-based `completing-read' almost-replacement.
-
-Unfortunately `ido-completing-read' is not suitable as a
-drop-in replacement for `completing-read', instead we use
-`ido-completing-read+' from the third-party package by the
-same name."
-  (if (and (require 'ido-completing-read+ nil t)
-           (fboundp 'ido-completing-read+))
-      (ido-completing-read+ prompt choices predicate require-match
-                            initial-input hist
-                            (or def (and require-match (car choices))))
-    (display-warning 'magit "ido-completing-read+ is not installed
-
-To use Ido completion with Magit you need to install the
-third-party `ido-completing-read+' packages.  Falling
-back to built-in `completing-read' for now." :error)
-    (magit-builtin-completing-read prompt choices predicate require-match
-                                   initial-input hist def)))
-
-(defun magit-prompt-with-default (prompt def)
-  (if (and def (length> prompt 2)
-           (string-equal ": " (substring prompt -2)))
-      (format "%s (default %s): " (substring prompt 0 -2) def)
-    prompt))
 
 (defvar-keymap magit-minibuffer-local-ns-map
   :parent minibuffer-local-map
@@ -713,7 +742,7 @@ This is similar to `read-string', but
   which case that is returned,
 * whitespace is not allowed and leading and trailing whitespace is
   removed automatically if NO-WHITESPACE is non-nil,
-* \": \" is appended to PROMPT, and
+* `format-prompt' is used internally.
 * an invalid DEFAULT-VALUE is silently ignored."
   (when default-value
     (when (consp default-value)
@@ -722,7 +751,7 @@ This is similar to `read-string', but
       (setq default-value nil)))
   (let* ((minibuffer-completion-table nil)
          (val (read-from-minibuffer
-               (magit-prompt-with-default (concat prompt ": ") default-value)
+               (format-prompt prompt default-value)
                initial-input (and no-whitespace magit-minibuffer-local-ns-map)
                nil history default-value inherit-input-method))
          (trim (lambda (regexp string)
@@ -739,7 +768,7 @@ This is similar to `read-string', but
            (user-error "Need non-empty input"))
           ((and no-whitespace (string-match-p "[\s\t\n]" val))
            (user-error "Input contains whitespace"))
-          (t val))))
+          (val))))
 
 (defun magit-read-string-ns ( prompt &optional initial-input history
                               default-value inherit-input-method)
@@ -754,10 +783,10 @@ This is similar to `read-string', but
                   (let ((parts (nconc (list ,@(mapcar #'cadr clauses))
                                       ,(and verbose '(list "[C-g] to abort")))))
                     (concat ,prompt
-                            (mapconcat #'identity (butlast parts) ", ")
+                            (string-join (butlast parts) ", ")
                             ", or "  (car (last parts)) " "))
                   ',(mapcar #'car clauses))
-            ,@(--map `(,(car it) ,@(cddr it)) clauses))
+            ,@(mapcar (##`(,(car %) ,@(cddr %))) clauses))
      (message "")))
 
 (defun magit-y-or-n-p (prompt &optional action)
@@ -770,12 +799,22 @@ ACTION is a member of option `magit-slow-confirm'."
     (y-or-n-p prompt)))
 
 (defvar magit--no-confirm-alist
-  '((safe-with-wip magit-wip-before-change-mode
+  '((safe-with-wip magit-wip-mode
                    discard reverse stage-all-changes unstage-all-changes)))
 
 (cl-defun magit-confirm ( action &optional prompt prompt-n noabort
                           (items nil sitems) prompt-suffix)
   (declare (indent defun))
+  (when (and prompt (listp prompt))
+    (setq prompt
+          (apply #'format (car prompt)
+                 (mapcar (##if (stringp %) (string-replace "%" "%%" %) %)
+                         (cdr prompt)))))
+  (when (and prompt-n (listp prompt-n))
+    (setq prompt-n
+          (apply #'format (car prompt-n)
+                 (mapcar (##if (stringp %) (string-replace "%" "%%" %) %)
+                         (cdr prompt-n)))))
   (setq prompt-n (format (concat (or prompt-n prompt) "? ") (length items)))
   (setq prompt   (format (concat (or prompt (magit-confirm-make-prompt action))
                                  "? ")
@@ -798,7 +837,7 @@ ACTION is a member of option `magit-slow-confirm'."
             ((length= items 1)
              (and (magit-y-or-n-p prompt action) items))
             ((length> items 1)
-             (and (magit-y-or-n-p (concat (mapconcat #'identity items "\n")
+             (and (magit-y-or-n-p (concat (string-join items "\n")
                                           "\n\n" prompt-n)
                                   action)
                   items)))
@@ -838,30 +877,26 @@ See info node `(magit)Debugging Tools' for more information."
               #'shell-quote-argument
               `(,(concat invocation-directory invocation-name)
                 "-Q" "--eval" "(setq debug-on-error t)"
-                ,@(cl-mapcan
-                   (lambda (dir) (list "-L" dir))
+                ,@(mapcan
+                   (##list "-L" %)
                    (delete-dups
-                    (cl-mapcan
+                    (mapcan
                      (lambda (lib)
-                       (let ((path (locate-library lib)))
-                         (cond
-                          (path
-                           (list (file-name-directory path)))
-                          ((not (equal lib "libgit"))
-                           (error "Cannot find mandatory dependency %s" lib)))))
+                       (if-let ((path (locate-library lib)))
+                           (list (file-name-directory path))
+                         (error "Cannot find mandatory dependency %s" lib)))
                      '(;; Like `LOAD_PATH' in `default.mk'.
                        "compat"
-                       "dash"
-                       "libgit"
+                       "cond-let"
+                       "llama"
+                       "seq"
                        "transient"
                        "with-editor"
                        ;; Obviously `magit' itself is needed too.
                        "magit"
-                       ;; While these are part of the Magit repository,
-                       ;; they are distributed as separate packages.
-                       "magit-section"
-                       "git-commit"
-                       ))))
+                       ;; While this is part of the Magit repository,
+                       ;; it is distributed as a separate package.
+                       "magit-section"))))
                 ;; Avoid Emacs bug#16406 by using full path.
                 "-l" ,(file-name-sans-extension (locate-library "magit")))
               " ")))
@@ -873,21 +908,20 @@ See info node `(magit)Debugging Tools' for more information."
 
 (defmacro magit-bind-match-strings (varlist string &rest body)
   "Bind variables to submatches according to VARLIST then evaluate BODY.
-Bind the symbols in VARLIST to submatches of the current match
-data, starting with 1 and incrementing by 1 for each symbol.  If
-the last match was against a string, then that has to be provided
-as STRING."
+Bind the symbols in VARLIST to submatches of the current match data,
+starting with 1 and incrementing by 1 for each symbol.  If the last
+match was against a string, then that has to be provided as STRING."
   (declare (indent 2) (debug (listp form body)))
-  (let ((s (cl-gensym "string"))
+  (let ((s (gensym "string"))
         (i 0))
-    `(let ((,s ,string))
-       (let ,(save-match-data
-               (cl-mapcan (lambda (sym)
+    `(let* ((,s ,string)
+            ,@(save-match-data
+                (seq-keep (lambda (sym)
                             (cl-incf i)
                             (and (not (eq (aref (symbol-name sym) 0) ?_))
-                                 (list (list sym (list 'match-string i s)))))
-                          varlist))
-         ,@body))))
+                                 `(,sym (match-str ,i ,s))))
+                          varlist)))
+       ,@body)))
 
 (defun magit-delete-line ()
   "Delete the rest of the current line."
@@ -901,26 +935,23 @@ If optional NUM is specified, only delete that subexpression."
 
 (defun magit-file-line (file)
   "Return the first line of FILE as a string."
-  (when (file-regular-p file)
-    (with-temp-buffer
-      (insert-file-contents file)
-      (buffer-substring-no-properties (point-min)
-                                      (line-end-position)))))
+  (and (file-regular-p file)
+       (with-temp-buffer
+         (insert-file-contents file)
+         (buffer-substring-no-properties (point-min)
+                                         (line-end-position)))))
 
 (defun magit-file-lines (file &optional keep-empty-lines)
   "Return a list of strings containing one element per line in FILE.
 Unless optional argument KEEP-EMPTY-LINES is t, trim all empty lines."
-  (when (file-regular-p file)
-    (with-temp-buffer
-      (insert-file-contents file)
-      (split-string (buffer-string) "\n" (not keep-empty-lines)))))
+  (and (file-regular-p file)
+       (with-temp-buffer
+         (insert-file-contents file)
+         (split-string (buffer-string) "\n" (not keep-empty-lines)))))
 
 (defun magit-set-header-line-format (string)
-  "Set the header-line using STRING.
-Propertize STRING with the `magit-header-line'.  If the `face'
-property of any part of STRING is already set, then that takes
-precedence.  Also pad the left side of STRING so that it aligns
-with the text area."
+  "Set `header-line-format' in the current buffer based on STRING.
+Pad the left side of STRING so that it aligns with the text area."
   (setq header-line-format
         (concat (propertize " " 'display '(space :align-to 0))
                 string)))
@@ -937,8 +968,8 @@ with the text area."
         (delete-char 1))
        ;; Valid format spec.
        ((looking-at "\\([-0-9.]*\\)\\([a-zA-Z]\\)")
-        (let* ((num (match-string 1))
-               (spec (string-to-char (match-string 2)))
+        (let* ((num (match-str 1))
+               (spec (string-to-char (match-str 2)))
                (val (assq spec specification)))
           (unless val
             (error "Invalid format character: `%%%c'" spec))
@@ -957,41 +988,20 @@ with the text area."
             ;; Delete the percent sign.
             (delete-region (1- (match-beginning 0)) (match-beginning 0)))))
        ;; Signal an error on bogus format strings.
-       (t
-        (error "Invalid format string"))))
+       ((error "Invalid format string"))))
     (buffer-string)))
 
 ;;; Missing from Emacs
 
-(defun magit-kill-this-buffer ()
-  "Kill the current buffer."
-  (interactive)
-  (kill-buffer (current-buffer)))
-
-(defun magit--buffer-string (&optional min max trim)
-  "Like `buffer-substring-no-properties' but the arguments are optional.
-
-This combines the benefits of `buffer-string', `buffer-substring'
-and `buffer-substring-no-properties' into one function that is
-not as painful to use as the latter.  I.e., you can write
-  (magit--buffer-string)
-instead of
-  (buffer-substring-no-properties (point-min)
-                                  (point-max))
-
-Optional MIN defaults to the value of `point-min'.
-Optional MAX defaults to the value of `point-max'.
-
-If optional TRIM is non-nil, then all leading and trailing
-whitespace is remove.  If it is the newline character, then
-one trailing newline is added."
-  ;; Lets write that one last time and be done with it:
-  (let ((str (buffer-substring-no-properties (or min (point-min))
-                                             (or max (point-max)))))
-    (if trim
-        (concat (string-trim str)
-                (and (eq trim ?\n) "\n"))
-      str)))
+(defun magit--separate (pred list)
+  "Separate elements of LIST that do and don't satisfy PRED.
+Return a list of two lists; the first containing the elements that
+do satisfy PRED and the second containing the elements that don't."
+  (let (y n)
+    (dolist (elt list)
+      (push elt (if (funcall pred elt) y n)))
+    (list (nreverse y)
+          (nreverse n))))
 
 (defun magit--version> (v1 v2)
   "Return t if version V1 is higher (younger) than V2.
@@ -1005,79 +1015,8 @@ This function should be named `version>=' and be part of Emacs."
 
 ;;; Kludges for Emacs Bugs
 
-(defun magit-file-accessible-directory-p (filename)
-  "Like `file-accessible-directory-p' but work around an Apple bug.
-See http://debbugs.gnu.org/cgi/bugreport.cgi?bug=21573#17
-and https://github.com/magit/magit/issues/2295."
-  (and (file-directory-p filename)
-       (file-accessible-directory-p filename)))
-
-(when (< emacs-major-version 27)
-  ;; Work around https://debbugs.gnu.org/cgi/bugreport.cgi?bug=21559.
-  ;; Fixed by cb55ccae8be946f1562d74718086a4c8c8308ee5 in Emacs 27.1.
-  (with-eval-after-load 'vc-git
-    (defun vc-git-conflicted-files (directory)
-      "Return the list of files with conflicts in DIRECTORY."
-      (let* ((status
-              (vc-git--run-command-string directory "diff-files"
-                                          "--name-status"))
-             (lines (when status (split-string status "\n" 'omit-nulls)))
-             files)
-        (dolist (line lines files)
-          (when (string-match "\\([ MADRCU?!]\\)[ \t]+\\(.+\\)" line)
-            (let ((state (match-string 1 line))
-                  (file (match-string 2 line)))
-              (when (equal state "U")
-                (push (expand-file-name file directory) files)))))))))
-
-(when (< emacs-major-version 27)
-  (defun vc-git--call@bug21559 (fn buffer command &rest args)
-    "Backport https://debbugs.gnu.org/cgi/bugreport.cgi?bug=21559."
-    (let ((process-environment process-environment))
-      (when revert-buffer-in-progress-p
-        (push "GIT_OPTIONAL_LOCKS=0" process-environment))
-      (apply fn buffer command args)))
-  (advice-add 'vc-git--call :around 'vc-git--call@bug21559)
-
-  (defun vc-git-command@bug21559
-      (fn buffer okstatus file-or-list &rest flags)
-    "Backport https://debbugs.gnu.org/cgi/bugreport.cgi?bug=21559."
-    (let ((process-environment process-environment))
-      (when revert-buffer-in-progress-p
-        (push "GIT_OPTIONAL_LOCKS=0" process-environment))
-      (apply fn buffer okstatus file-or-list flags)))
-  (advice-add 'vc-git-command :around 'vc-git-command@bug21559)
-
-  (defun auto-revert-handler@bug21559 (fn)
-    "Backport https://debbugs.gnu.org/cgi/bugreport.cgi?bug=21559."
-    (let ((revert-buffer-in-progress-p t))
-      (funcall fn)))
-  (advice-add 'auto-revert-handler :around 'auto-revert-handler@bug21559)
-  )
-
-(when (< emacs-major-version 26)
-  ;; In Emacs 25 `completion-pcm--all-completions' reverses the
-  ;; completion list.  This is the version from Emacs 26, which
-  ;; fixes that issue.  bug#24676
-  (defun magit-completion-pcm--all-completions (prefix pattern table pred)
-    (if (completion-pcm--pattern-trivial-p pattern)
-        (all-completions (concat prefix (car pattern)) table pred)
-      (let* ((regex (completion-pcm--pattern->regex pattern))
-             (case-fold-search completion-ignore-case)
-             (completion-regexp-list (cons regex completion-regexp-list))
-             (compl (all-completions
-                     (concat prefix
-                             (if (stringp (car pattern)) (car pattern) ""))
-                     table pred)))
-        (if (not (functionp table))
-            compl
-          (let ((poss ()))
-            (dolist (c compl)
-              (when (string-match-p regex c) (push c poss)))
-            (nreverse poss)))))))
-
 (defun magit-which-function ()
-  "Return current function name based on point.
+  "Return current function name based on point, without caching.
 
 This is a simple wrapper around `which-function', that resets
 Imenu's potentially outdated and therefore unreliable cache by
@@ -1134,7 +1073,9 @@ the value in the symbol's `saved-value' property if any, or
 ;;; Kludges for Info Manuals
 
 ;;;###autoload
-(defun Info-follow-nearest-node--magit-gitman (fn &optional fork)
+(define-advice Info-follow-nearest-node (:around (fn &optional fork) gitman)
+  ;; Do not use `if-let*' (aka `cond-let--if-let*') because this is
+  ;; copied to the autoload file, which does not require `cond-let'.
   (let ((node (Info-get-token
                (point) "\\*note[ \n\t]+"
                "\\*note[ \n\t]+\\([^:]*\\):\\(:\\|[ \n\t]*(\\)?")))
@@ -1142,22 +1083,15 @@ the value in the symbol's `saved-value' property if any, or
         (pcase magit-view-git-manual-method
           ('info  (funcall fn fork))
           ('man   (require 'man)
-                  (man (match-string 1 node)))
+                  (man (match-str 1 node)))
           ('woman (require 'woman)
-                  (woman (match-string 1 node)))
-          (_
-           (user-error "Invalid value for `magit-view-git-manual-method'")))
+                  (woman (match-str 1 node)))
+          (_ (user-error "Invalid value for `magit-view-git-manual-method'")))
       (funcall fn fork))))
-
-;;;###autoload
-(advice-add 'Info-follow-nearest-node :around
-            #'Info-follow-nearest-node--magit-gitman)
 
 ;; When making changes here, then also adjust the copy in docs/Makefile.
 ;;;###autoload
-(advice-add 'org-man-export :around #'org-man-export--magit-gitman)
-;;;###autoload
-(defun org-man-export--magit-gitman (fn link description format)
+(define-advice org-man-export (:around (fn link description format) gitman)
   (if (and (eq format 'texinfo)
            (string-prefix-p "git" link))
       (string-replace "%s" link "
@@ -1177,46 +1111,30 @@ the %s(1) manpage.
 
 ;;; Kludges for Package Managers
 
-(defun magit--straight-chase-links (filename)
+(defun magit--chase-links (filename)
   "Chase links in FILENAME until a name that is not a link.
 
-This is the same as `file-chase-links', except that it also
-handles fake symlinks that are created by the package manager
-straight.el on Windows.
+This is the same as `file-chase-links', except that it also handles
+fake symlinks that are created by some source based package managers
+\(Elpaca and Straight) on Windows.
 
 See <https://github.com/raxod502/straight.el/issues/520>."
-  (when (and (bound-and-true-p straight-symlink-emulation-mode)
-             (fboundp 'straight-chase-emulated-symlink))
-    (when-let ((target (straight-chase-emulated-symlink filename)))
-      (unless (eq target 'broken)
-        (setq filename target))))
+  (when-let*
+      ((manager (cond ((bound-and-true-p straight-symlink-mode) 'straight)
+                      ((bound-and-true-p elpaca-no-symlink-mode) 'elpaca)))
+       (build (pcase manager
+                ('straight (bound-and-true-p straight-build-dir))
+                ('elpaca (bound-and-true-p elpaca-builds-directory))))
+       (_(string-prefix-p build filename))
+       (repo (pcase manager
+               ('straight
+                (and (bound-and-true-p straight-base-dir)
+                     (expand-file-name "repos/magit/lisp/" straight-base-dir)))
+               ('elpaca
+                (and (bound-and-true-p elpaca-repos-directory)
+                     (expand-file-name "magit/lisp/" elpaca-repos-directory))))))
+    (setq filename (expand-file-name (file-name-nondirectory filename) repo)))
   (file-chase-links filename))
-
-;;; Kludges for older Emacs versions
-
-(if (fboundp 'with-connection-local-variables)
-    (defalias 'magit--with-connection-local-variables
-      #'with-connection-local-variables)
-  (defmacro magit--with-connection-local-variables (&rest body)
-    "Abridged `with-connection-local-variables' for pre Emacs 27 compatibility.
-Bind shell file name and switch for remote execution.
-`with-connection-local-variables' isn't available until Emacs 27.
-This kludge provides the minimal functionality required by
-Magit."
-    `(if (file-remote-p default-directory)
-         (pcase-let ((`(,shell-file-name ,shell-command-switch)
-                      (with-no-warnings ; about unknown tramp functions
-                        (require 'tramp)
-                        (let ((vec (tramp-dissect-file-name
-                                    default-directory)))
-                          (list (tramp-get-method-parameter
-                                 vec 'tramp-remote-shell)
-                                (mapconcat #'identity
-                                           (tramp-get-method-parameter
-                                            vec 'tramp-remote-shell-args)
-                                           " "))))))
-           ,@body)
-       ,@body)))
 
 ;;; Miscellaneous
 
@@ -1225,7 +1143,7 @@ Magit."
 Like `message', except that if the users configured option
 `magit-no-message' to prevent the message corresponding to
 FORMAT-STRING to be displayed, then don't."
-  (unless (--first (string-prefix-p it format-string) magit-no-message)
+  (unless (seq-find (##string-prefix-p % format-string) magit-no-message)
     (apply #'message format-string args)))
 
 (defun magit-msg (format-string &rest args)
@@ -1245,20 +1163,41 @@ Like `message', except that `message-log-max' is bound to nil."
 
 (defun magit--ellipsis (&optional where)
   "Build an ellipsis always as string, depending on WHERE."
-  (if (stringp magit-ellipsis)
-      magit-ellipsis
-    (if-let ((pair (car (or
-                         (alist-get (or where t) magit-ellipsis)
-                         (alist-get t magit-ellipsis)))))
-        (pcase-let ((`(,fancy . ,universal) pair))
-          (let ((ellipsis (if (and fancy (char-displayable-p fancy))
-                              fancy
-                            universal)))
-            (if (characterp ellipsis)
-                (char-to-string ellipsis)
-              ellipsis)))
-      (user-error "Variable magit-ellipsis is invalid"))))
+  (cond-let
+    ((stringp magit-ellipsis)
+     magit-ellipsis)
+    ([pair (car (or (alist-get (or where t) magit-ellipsis)
+                    (alist-get t magit-ellipsis)))]
+     (pcase-let* ((`(,fancy . ,universal) pair)
+                  (ellipsis (if (and fancy (char-displayable-p fancy))
+                                fancy
+                              universal)))
+       (if (characterp ellipsis)
+           (char-to-string ellipsis)
+         ellipsis)))
+    ((user-error "Variable magit-ellipsis is invalid"))))
+
+(defun magit--ext-regexp-quote (string)
+  "Like `reqexp-quote', but for Extended Regular Expressions."
+  (let ((special (string-to-list "[*.\\?+^$({"))
+        (quoted nil))
+    (dolist (char string)
+      (when (memq char special)
+        (push ?\\ quoted))
+      (push char quoted))
+    (concat (nreverse quoted))))
 
 ;;; _
 (provide 'magit-base)
+;; Local Variables:
+;; read-symbol-shorthands: (
+;;   ("and$"         . "cond-let--and$")
+;;   ("and>"         . "cond-let--and>")
+;;   ("and-let"      . "cond-let--and-let")
+;;   ("if-let"       . "cond-let--if-let")
+;;   ("when-let"     . "cond-let--when-let")
+;;   ("while-let"    . "cond-let--while-let")
+;;   ("match-string" . "match-string")
+;;   ("match-str"    . "match-string-no-properties"))
+;; End:
 ;;; magit-base.el ends here

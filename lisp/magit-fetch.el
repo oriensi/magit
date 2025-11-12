@@ -1,9 +1,9 @@
 ;;; magit-fetch.el --- Download objects and refs  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
-;; Author: Jonas Bernoulli <jonas@bernoul.li>
-;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
+;; Author: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
+;; Maintainer: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -30,14 +30,15 @@
 
 ;;; Commands
 
-;;;###autoload (autoload 'magit-fetch "magit-fetch" nil t)
+;;;###autoload(autoload 'magit-fetch "magit-fetch" nil t)
 (transient-define-prefix magit-fetch ()
   "Fetch from another repository."
   :man-page "git-fetch"
   ["Arguments"
    ("-p" "Prune deleted branches" ("-p" "--prune"))
    ("-t" "Fetch all tags" ("-t" "--tags"))
-   (7 "-u" "Fetch full history" "--unshallow")]
+   ("-u" "Fetch full history" "--unshallow" :level 7)
+   ("-F" "Force" ("-f" "--force"))]
   ["Fetch from"
    ("p" magit-fetch-from-pushremote)
    ("u" magit-fetch-from-upstream)
@@ -57,7 +58,7 @@
   (run-hooks 'magit-credential-hook)
   (magit-run-git-async "fetch" remote args))
 
-;;;###autoload (autoload 'magit-fetch-from-pushremote "magit-fetch" nil t)
+;;;###autoload(autoload 'magit-fetch-from-pushremote "magit-fetch" nil t)
 (transient-define-suffix magit-fetch-from-pushremote (args)
   "Fetch from the current push-remote.
 
@@ -83,10 +84,9 @@ push-remote."
      ((member remote (magit-list-remotes)) remote)
      (remote
       (format "%s, replacing invalid" v))
-     (t
-      (format "%s, setting that" v)))))
+     ((format "%s, setting that" v)))))
 
-;;;###autoload (autoload 'magit-fetch-from-upstream "magit-fetch" nil t)
+;;;###autoload(autoload 'magit-fetch-from-upstream "magit-fetch" nil t)
 (transient-define-suffix magit-fetch-from-upstream (remote args)
   "Fetch from the \"current\" remote, usually the upstream.
 
@@ -98,8 +98,8 @@ Otherwise if a remote named \"origin\" exists, then use that.
 If no remote can be determined, then this command is not available
 from the `magit-fetch' transient prefix and invoking it directly
 results in an error."
-  :if          (lambda () (magit-get-current-remote t))
-  :description (lambda () (magit-get-current-remote t))
+  :if          (##magit-get-current-remote t)
+  :description (##magit-get-current-remote t)
   (interactive (list (magit-get-current-remote t)
                      (magit-fetch-arguments)))
   (unless remote
@@ -155,7 +155,7 @@ removed on the respective remote."
   (run-hooks 'magit-credential-hook)
   (magit-run-git-async "remote" "update"))
 
-;;;###autoload (autoload 'magit-fetch-modules "magit-fetch" nil t)
+;;;###autoload(autoload 'magit-fetch-modules "magit-fetch" nil t)
 (transient-define-prefix magit-fetch-modules (&optional transient args)
   "Fetch all populated submodules.
 
@@ -177,14 +177,20 @@ with a prefix argument."
                  (list nil (transient-args 'magit-fetch-modules))))
   (if transient
       (transient-setup 'magit-fetch-modules)
-    (when (magit-git-version< "2.8.0")
-      (when-let ((value (transient-arg-value "--jobs=" args)))
-        (message "Dropping --jobs; not supported by Git v%s"
-                 (magit-git-version))
-        (setq args (remove (format "--jobs=%s" value) args))))
     (magit-with-toplevel
       (magit-run-git-async "fetch" "--recurse-submodules" args))))
 
 ;;; _
 (provide 'magit-fetch)
+;; Local Variables:
+;; read-symbol-shorthands: (
+;;   ("and$"         . "cond-let--and$")
+;;   ("and>"         . "cond-let--and>")
+;;   ("and-let"      . "cond-let--and-let")
+;;   ("if-let"       . "cond-let--if-let")
+;;   ("when-let"     . "cond-let--when-let")
+;;   ("while-let"    . "cond-let--while-let")
+;;   ("match-string" . "match-string")
+;;   ("match-str"    . "match-string-no-properties"))
+;; End:
 ;;; magit-fetch.el ends here

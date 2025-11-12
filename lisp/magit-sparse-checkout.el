@@ -1,9 +1,9 @@
 ;;; magit-sparse-checkout.el --- Sparse checkout support for Magit  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
 ;; Author: Kyle Meyer <kyle@kyleam.com>
-;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
+;; Maintainer: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -23,15 +23,7 @@
 ;;; Commentary:
 
 ;; This library provides an interface to the `git sparse-checkout'
-;; command.  It's been possible to define sparse checkouts since Git
-;; v1.7.0 by adding patterns to $GIT_DIR/info/sparse-checkout and
-;; calling `git read-tree -mu HEAD' to update the index and working
-;; tree.  However, Git v2.25 introduced the `git sparse-checkout'
-;; command along with "cone mode", which restricts the possible
-;; patterns to directories to provide better performance.
-;;
-;; The goal of this library is to support the `git sparse-checkout'
-;; command operating in cone mode.
+;; command (operating in cone mode).
 
 ;;; Code:
 
@@ -42,13 +34,6 @@
 (defun magit-sparse-checkout-enabled-p ()
   "Return non-nil if working tree is a sparse checkout."
   (magit-get-boolean "core.sparsecheckout"))
-
-(defun magit-sparse-checkout--assert-version ()
-  ;; Older versions of Git have the ability to define sparse checkout
-  ;; patterns in .git/info/sparse-checkout, but the sparse-checkout
-  ;; command isn't available until 2.25.0.
-  (when (magit-git-version< "2.25.0")
-    (user-error "`git sparse-checkout' not available until Git v2.25")))
 
 (defun magit-sparse-checkout--auto-enable ()
   (if (magit-sparse-checkout-enabled-p)
@@ -69,7 +54,7 @@ See the `git sparse-checkout' manpage for details about
 
 ;;; Commands
 
-;;;###autoload (autoload 'magit-sparse-checkout "magit-sparse-checkout" nil t)
+;;;###autoload(autoload 'magit-sparse-checkout "magit-sparse-checkout" nil t)
 (transient-define-prefix magit-sparse-checkout ()
   "Create and manage sparse checkouts."
   :man-page "git-sparse-checkout"
@@ -89,7 +74,6 @@ See the `git sparse-checkout' manpage for details about
 (defun magit-sparse-checkout-enable (&optional args)
   "Convert the working tree to a sparse checkout."
   (interactive (list (transient-args 'magit-sparse-checkout)))
-  (magit-sparse-checkout--assert-version)
   (magit-run-git-async "sparse-checkout" "init" "--cone" args))
 
 ;;;###autoload
@@ -104,7 +88,6 @@ directories, call `magit-sparse-checkout-add' instead."
           ;; dealing with very large trees, listing all subdirectories
           ;; may need to be reconsidered.
           (magit-revision-directories "HEAD"))))
-  (magit-sparse-checkout--assert-version)
   (magit-sparse-checkout--auto-enable)
   (magit-run-git-async "sparse-checkout" "set" directories))
 
@@ -122,9 +105,8 @@ directories, call `magit-sparse-checkout-set' instead."
            (let ((re (concat
                       "\\`"
                       (regexp-opt (magit-sparse-checkout-directories)))))
-             (lambda (d) (string-match-p re d)))
+             (##string-match-p re %))
            (magit-revision-directories "HEAD")))))
-  (magit-sparse-checkout--assert-version)
   (magit-sparse-checkout--auto-enable)
   (magit-run-git-async "sparse-checkout" "add" directories))
 
@@ -135,7 +117,6 @@ Some operations such as merging or rebasing may need to check out
 files that aren't included in the sparse checkout.  Call this
 command to reset to the sparse checkout state."
   (interactive)
-  (magit-sparse-checkout--assert-version)
   (magit-run-git-async "sparse-checkout" "reapply"))
 
 ;;;###autoload
@@ -145,7 +126,6 @@ Note that disabling the sparse checkout does not clear the
 configured directories.  Call `magit-sparse-checkout-enable' to
 restore the previous sparse checkout."
   (interactive)
-  (magit-sparse-checkout--assert-version)
   (magit-run-git-async "sparse-checkout" "disable"))
 
 ;;; Miscellaneous
@@ -167,4 +147,15 @@ This header is not inserted by default.  To enable it, add it to
 
 ;;; _
 (provide 'magit-sparse-checkout)
+;; Local Variables:
+;; read-symbol-shorthands: (
+;;   ("and$"         . "cond-let--and$")
+;;   ("and>"         . "cond-let--and>")
+;;   ("and-let"      . "cond-let--and-let")
+;;   ("if-let"       . "cond-let--if-let")
+;;   ("when-let"     . "cond-let--when-let")
+;;   ("while-let"    . "cond-let--while-let")
+;;   ("match-string" . "match-string")
+;;   ("match-str"    . "match-string-no-properties"))
+;; End:
 ;;; magit-sparse-checkout.el ends here

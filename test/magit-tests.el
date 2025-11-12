@@ -1,6 +1,6 @@
 ;;; magit-tests.el --- Tests for Magit  -*- lexical-binding:t; coding:utf-8 -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,7 +20,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'dash)
 (require 'ert)
 (require 'tramp)
 (require 'tramp-sh)
@@ -37,12 +36,11 @@
   (declare (indent 0) (debug t))
   (let ((dir (make-symbol "dir")))
     `(let ((,dir (file-name-as-directory (make-temp-file "magit-" t)))
-           (process-environment process-environment)
            (magit-git-global-arguments
             (nconc (list "-c" "protocol.file.allow=always")
+                   (list "-c" "user.name=\"A U Thor\"")
+                   (list "-c" "user.email=\"a.u.thor@example.com\"")
                    magit-git-global-arguments)))
-       (push "GIT_AUTHOR_NAME=A U Thor" process-environment)
-       (push "GIT_AUTHOR_EMAIL=a.u.thor@example.com" process-environment)
        (condition-case err
            (cl-letf (((symbol-function #'message) (lambda (&rest _))))
              (let ((default-directory (file-truename ,dir)))
@@ -58,6 +56,20 @@
 (defmacro magit-with-bare-test-repository (&rest body)
   (declare (indent 1) (debug t))
   `(magit-with-test-directory (magit-test-init-repo "." "--bare") ,@body))
+
+(defun magit-test-visible-text (&optional raw)
+  (save-excursion
+    (let (chunks)
+      (goto-char (point-min))
+      (while (let ((to (next-single-char-property-change (point) 'invisible)))
+               (unless (invisible-p (point))
+                 (push (buffer-substring-no-properties (point) to) chunks))
+               (goto-char to)
+               (< (point) (point-max))))
+      (let ((result (string-join (nreverse chunks))))
+        (unless raw
+          (setq result (string-trim result)))
+        result))))
 
 ;;; Git
 
@@ -147,6 +159,16 @@
   (should (equal (magit-toplevel   "wrap/subsubdir-link")
                  (expand-file-name "repo/"))))
 
+(ert-deftest magit-in-bare-repo ()
+  "Test `magit-bare-repo-p' in a bare repository."
+  (magit-with-bare-test-repository
+    (should (magit-bare-repo-p))))
+
+(ert-deftest magit-in-non-bare-repo ()
+  "Test `magit-bare-repo-p' in a non-bare repository."
+  (magit-with-test-repository
+    (should-not (magit-bare-repo-p))))
+
 (defun magit-test-magit-get ()
   (should (equal (magit-get-all "a.b") '("val1" "val2")))
   (should (equal (magit-get "a.b") "val2"))
@@ -229,6 +251,8 @@
     (should (equal (magit-list-remote-branch-names "origin" t)
                    (list "master")))))
 
+;;; Prompts
+
 (ert-deftest magit-process:match-prompt-nil-when-no-match ()
   (should (null (magit-process-match-prompt '("^foo: ?$") "bar: "))))
 
@@ -247,11 +271,53 @@
   (let* ((prompts '("^foo '\\(?99:.*\\)': ?$"))
          (prompt (magit-process-match-prompt prompts "foo 'bar':")))
     (should (equal prompt "foo 'bar': "))
-    (should (equal (match-string 99 "foo 'bar':") "bar"))))
+    (should (equal (match-str 99 "foo 'bar':") "bar"))))
+
+(ert-deftest magit-process:password-prompt-regexps ()
+  (cl-flet ((m (prompt)
+              (and (magit-process-match-prompt
+                    magit-process-password-prompt-regexps prompt)
+                   (or (match-str 99 prompt) t))))
+    ;; History of `magit-process-password-prompt-regexps':
+    ;; a36a801cc2 Initial noisy version.
+    ;; 2a3bbc3c53 First cleanup.
+    ;;   "^\\(Enter \\)?[Pp]assphrase\\( for key '.*'\\)?: ?$"
+    ;;   "^\\(Enter \\)?[Pp]assword\\( for '.*'\\)?: ?$"
+    ;;   "^.*'s password: ?$"
+    ;;   "^Yubikey for .*: ?$")
+    (should (eq (m "Passphrase: ") t))
+    (should (eq (m "Enter passphrase: ") t))
+    (should (eq (m "Enter passphrase for key '/home/me/.ssh/id_rsa': ") t))
+    (should (eq (m "Password: ") t))
+    (should (equal (m "Password for 'https://example.com': ") "example.com"))
+    (should (eq (m "Yubikey for foobar: ") t))
+    ;; 272f2069a3 Support for "RSA " in passphrase prompt.
+    ;;   $ strings $(which ssh) | grep -i passphrase
+    ;;   Nowadays this only gives:
+    ;;   Enter passphrase for key '%.100s':
+    ;;   So this is only necessary for historic versions.
+    (should (eq (m "Enter passphrase for RSA key '/home/me/.ssh/id_rsa': ") t))
+    ;; #2736 Support pcsc-lite (version 1.8.14 on NixOS).
+    (should (eq (m "Enter PIN for 'PIV_II (PIV Card Holder pin)':") t))
+    ;; #3651 Don't include "https://" in host match.
+    (should (equal (m "Password for 'https://me@magit.vc':") "me@magit.vc"))
+    ;; #4025 Don't require quotes around host match.
+    (should (equal (m "Password for ahihi@foo:") "ahihi@foo"))
+    ;; #4076 Support GnuPG for PGP and SSH keys.
+    (should (eq (m "│ Please enter the passphrase to unlock the OpenPGP secret key:  │") t))
+    (should (eq (m "│ Please enter the passphrase for the ssh key: │") t))
+    ;; #4318 Support git-credential-manager-core.
+    (should (eq (m "Token: ") t))
+    ;; #4992 Support openssh (version 9.1p1).
+    (should (equal (m "(user@host) Password for user@host: ") "user@host"))
+    ;; #5257 Support another prompt (by what?).
+    (should (equal (m "volumio@192.168.0.211's password: ") "volumio@192.168.0.211"))
+    ;; #5288 Major rewrite, adding this test and history.
+    ))
 
 (ert-deftest magit-process:password-prompt ()
   (let ((magit-process-find-password-functions
-         (list (lambda (host) (when (string= host "www.host.com") "mypasswd")))))
+         (list (lambda (host) (and (string= host "www.host.com") "mypasswd")))))
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_process string) string)))
       (should (string-equal (magit-process-password-prompt
@@ -359,9 +425,10 @@ Enter passphrase for key '/home/user/.ssh/id_rsa': "
 
 (defun magit-test-get-section (list file)
   (magit-status-setup-buffer default-directory)
-  (--first (equal (oref it value) file)
-           (oref (magit-get-section `(,list (status)))
-                 children)))
+  (magit-section-show-level-4-all)
+  (seq-find (##equal (oref % value) file)
+            (oref (magit-get-section `(,list (status)))
+                  children)))
 
 (ert-deftest magit-status:file-sections ()
   (magit-with-test-repository
@@ -401,17 +468,25 @@ Enter passphrase for key '/home/user/.ssh/id_rsa': "
              '(unpushed . "@{upstream}..")
              (magit-rev-parse "--short" "master")))))
 
-;;; libgit
-
-(ert-deftest magit-in-bare-repo ()
-  "Test `magit-bare-repo-p' in a bare repository."
-  (magit-with-bare-test-repository
-    (should (magit-bare-repo-p))))
-
-(ert-deftest magit-in-non-bare-repo ()
-  "Test `magit-bare-repo-p' in a non-bare repository."
+(ert-deftest magit-status:section-commands ()
   (magit-with-test-repository
-    (should-not (magit-bare-repo-p))))
+    (magit-git "commit" "-m" "dummy" "--allow-empty")
+    (with-current-buffer (magit-status-setup-buffer)
+      (magit-section-show-level-1-all)
+      (should (string-match-p
+               "\\`Head:[[:space:]]+master dummy\n\nRecent commits\\'"
+               (magit-test-visible-text)))
+      (magit-section-show-level-2-all)
+      (should (string-match-p
+               "\\`Head:[[:space:]]+master dummy\n
+Recent commits\n[[:xdigit:]]\\{7,\\} master dummy\\'"
+               (magit-test-visible-text)))
+      (goto-char (point-min))
+      (search-forward "Recent")
+      (magit-section-show-level-1)
+      (should (string-match-p
+               "\\`Head:[[:space:]]+master dummy\n\nRecent commits\\'"
+               (magit-test-visible-text))))))
 
 ;;; Utils
 
@@ -460,9 +535,11 @@ Enter passphrase for key '/home/user/.ssh/id_rsa': "
     (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) nil)))
       (should (equal (magit--ellipsis 'foo) (magit--ellipsis))))))
 
-;;; magit-tests.el ends soon
+;;; _
 (provide 'magit-tests)
 ;; Local Variables:
-;; indent-tabs-mode: nil
+;; read-symbol-shorthands: (
+;;   ("match-string" . "match-string")
+;;   ("match-str" . "match-string-no-properties"))
 ;; End:
 ;;; magit-tests.el ends here

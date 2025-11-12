@@ -31,6 +31,7 @@ All Contributors
 - Aaron Madlon-Kay
 - Abdo Roig-Maranges
 - Adam Benanti
+- Adam Jones
 - Adam Kruszewski
 - Adam Porter
 - Adam Spiers
@@ -56,6 +57,7 @@ All Contributors
 - Andrew Kirkpatrick
 - Andrew Psaltis
 - Andrew Schwartzmeyer
+- Andrew Zipperer
 - Andrey Smirnov
 - Andriy Kmit'
 - Andy Sawyer
@@ -101,6 +103,7 @@ All Contributors
 - Clément Pit-Claudel
 - Cornelius Mika
 - Craig Andera
+- Curt Brune
 - Daanturo
 - Dale Hagglund
 - Damien Cassou
@@ -151,6 +154,7 @@ All Contributors
 - Frédéric Giquel
 - Fritz Grabo
 - Fritz Stelzer
+- gemmaro
 - Geoff Shannon
 - George Kadianakis
 - Géza Herman
@@ -169,16 +173,20 @@ All Contributors
 - Ian Eure
 - Ian Milligan
 - Ilya Grigoriev
+- Iñaki Arenaza
 - Ingmar Sittl
 - Ingo Lohmar
 - Ioan-Adrian Ratiu
 - Ivan Brennan
+- Jacob Ilsø
 - Jan Tatarik
 - Jasper St. Pierre
+- JD Smith
 - Jean-Louis Giordano
 - Jeff Bellegarde
 - Jeff Dairiki
 - Jeremy Meng
+- Jeremy Sowden
 - Jesse Alama
 - Jim Blandy
 - Joakim Jalap
@@ -232,6 +240,7 @@ All Contributors
 - Louis Roché
 - Luís Oliveira
 - Luke Amdor
+- Magnar Sveen
 - Magnus Malm
 - Mak Kolybabi
 - Manuel Vázquez Acosta
@@ -250,6 +259,7 @@ All Contributors
 - Markus Beppler
 - Martin Joerg
 - Martin Polden
+- Matt Beshara
 - Matthew Fluet
 - Matthew Kraai
 - Matthieu Hauglustaine
@@ -277,18 +287,22 @@ All Contributors
 - Nicolas Dudebout
 - Nicolas Petton
 - Nicolas Richard
+- Nikita Leshenko
 - Nikolay Martynov
 - Noam Postavsky
 - N. Troy de Freitas
-- Ola x Nilsson
+- Ola Nilsson
 - Ole Arndt
 - Oleh Krehel
 - Orivej Desh
 - Óscar Fuentes
 - Pancho Horrillo
+- Park Zhou
+- Paul Pogonyshev
 - Paul Stadig
 - Pavel Holejsovsky
 - Pekka Pessi
+- Pengji Zhang
 - Peter Eisentraut
 - Peter Jaros
 - Peter J. Weisberg
@@ -303,7 +317,9 @@ All Contributors
 - Phil Sainty
 - Pierre Neidhardt
 - Pieter Praet
+- Pieter van Oostrum
 - Prathamesh Sonpatki
+- Pratyush Yadav
 - Pritam Baral
 - rabio
 - Radon Rosborough
@@ -315,11 +331,13 @@ All Contributors
 - Rémi Vanicat
 - René Stadler
 - Richard Kim
+- Richard Sent
 - Robert Boone
 - Robert Irelan
 - Robin Green
 - Roey Darwish Dror
 - Roger Crew
+- Roland Marchand
 - Romain Francoise
 - Ron Parker
 - Roy Crihfield
@@ -352,6 +370,7 @@ All Contributors
 - Steven Thomas
 - Steven Vancoillie
 - Steve Purcell
+- StrawberryTea
 - Suhail Shergill
 - Sylvain Rousseau
 - Syohei Yoshida
@@ -390,7 +409,9 @@ All Contributors
 - Win Treese
 - Wojciech Siewierski
 - Wouter Bolsterlee
+- X4lldux
 - Xavier Noria
+- Xavier Young
 - Xu Chunyang
 - Yann Herklotz
 - Yann Hodique

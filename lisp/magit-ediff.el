@@ -1,9 +1,9 @@
 ;;; magit-ediff.el --- Ediff extension for Magit  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2008-2023 The Magit Project Contributors
+;; Copyright (C) 2008-2025 The Magit Project Contributors
 
-;; Author: Jonas Bernoulli <jonas@bernoul.li>
-;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
+;; Author: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
+;; Maintainer: Jonas Bernoulli <emacs.magit@jonas.bernoulli.dev>
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,8 +42,8 @@
   :group 'magit-extensions)
 
 (defcustom magit-ediff-quit-hook
-  '(magit-ediff-cleanup-auxiliary-buffers
-    magit-ediff-restore-previous-winconf)
+  (list #'magit-ediff-cleanup-auxiliary-buffers
+        #'magit-ediff-restore-previous-winconf)
   "Hooks to run after finishing Ediff, when that was invoked using Magit.
 The hooks are run in the Ediff control buffer.  This is similar
 to `ediff-quit-hook' but takes the needs of Magit into account.
@@ -53,8 +53,8 @@ invoked using Magit."
   :group 'magit-ediff
   :type 'hook
   :get #'magit-hook-custom-get
-  :options '(magit-ediff-cleanup-auxiliary-buffers
-             magit-ediff-restore-previous-winconf))
+  :options (list #'magit-ediff-cleanup-auxiliary-buffers
+                 #'magit-ediff-restore-previous-winconf))
 
 (defcustom magit-ediff-dwim-resolve-function #'magit-ediff-resolve-rest
   "The function `magit-ediff-dwim' uses to resolve conflicts."
@@ -115,7 +115,7 @@ recommend you do not further complicate that by enabling this.")
 
 (defvar magit-ediff-previous-winconf nil)
 
-;;;###autoload (autoload 'magit-ediff "magit-ediff" nil)
+;;;###autoload(autoload 'magit-ediff "magit-ediff" nil)
 (transient-define-prefix magit-ediff ()
   "Show differences using the Ediff package."
   :info-manual "(ediff)"
@@ -181,8 +181,8 @@ is put in FILE."
     (setq get  (nreverse get))
     (setq make (nreverse make))
     (setq kill (nreverse kill))
-    (let ((mconf (cl-gensym "conf"))
-          (mfile (cl-gensym "file")))
+    (let ((mconf (gensym "conf"))
+          (mfile (gensym "file")))
       `(magit-with-toplevel
          (let ((,mconf (current-window-configuration))
                (,mfile ,file)
@@ -224,8 +224,7 @@ and alternative commands."
     (let* ((dir   (magit-gitdir))
            (revA  (or (magit-name-branch "HEAD")
                       (magit-commit-p "HEAD")))
-           (revB  (cl-find-if (lambda (head)
-                                (file-exists-p (expand-file-name head dir)))
+           (revB  (cl-find-if (##file-exists-p (expand-file-name % dir))
                               '("MERGE_HEAD" "CHERRY_PICK_HEAD" "REVERT_HEAD")))
            (revB  (or (magit-name-branch revB)
                       (magit-commit-p revB)))
@@ -266,22 +265,22 @@ and alternative commands."
                          (save-excursion
                            (goto-char (point-min))
                            (unless (re-search-forward "^<<<<<<< " nil t)
-                             (magit-stage-file file))))))))
-        (if fileC
-            (magit-ediff-buffers
-             ((magit-get-revision-buffer revA fileA)
-              (magit-find-file-noselect  revA fileA))
-             ((magit-get-revision-buffer revB fileB)
-              (magit-find-file-noselect  revB fileB))
-             ((magit-get-revision-buffer revC fileC)
-              (magit-find-file-noselect  revC fileC))
-             setup quit file)
-          (magit-ediff-buffers
-           ((magit-get-revision-buffer revA fileA)
-            (magit-find-file-noselect  revA fileA))
-           ((magit-get-revision-buffer revB fileB)
-            (magit-find-file-noselect  revB fileB))
-           nil setup quit file))))))
+                             (magit-stage-files (list file)))))))))
+        (cond (fileC
+               (magit-ediff-buffers
+                ((magit-get-revision-buffer revA fileA)
+                 (magit-find-file-noselect  revA fileA))
+                ((magit-get-revision-buffer revB fileB)
+                 (magit-find-file-noselect  revB fileB))
+                ((magit-get-revision-buffer revC fileC)
+                 (magit-find-file-noselect  revC fileC))
+                setup quit file))
+              ((magit-ediff-buffers
+                ((magit-get-revision-buffer revA fileA)
+                 (magit-find-file-noselect  revA fileA))
+                ((magit-get-revision-buffer revB fileB)
+                 (magit-find-file-noselect  revB fileB))
+                nil setup quit file)))))))
 
 ;;;###autoload
 (defun magit-ediff-resolve-rest (file)
@@ -333,7 +332,7 @@ FILE has to be relative to the top directory of the repository."
            (bufC* (or bufC (find-file-noselect file)))
            (coding-system-for-read
             (buffer-local-value 'buffer-file-coding-system bufC*))
-           (bufA* (magit-find-file-noselect-1 "HEAD" file t))
+           (bufA* (magit-find-file-noselect "HEAD" file t))
            (bufB* (magit-find-file-index-noselect file t)))
       (with-current-buffer bufB* (setq buffer-read-only nil))
       (magit-ediff-buffers
@@ -489,8 +488,7 @@ mind at all, then it asks the user for a command to run."
               (magit-ediff-show-stash revB))
              (file
               (funcall command file))
-             (t
-              (call-interactively command)))))))
+             ((call-interactively command)))))))
 
 ;;;###autoload
 (defun magit-ediff-show-staged (file)
@@ -603,4 +601,15 @@ stash that were staged."
 
 ;;; _
 (provide 'magit-ediff)
+;; Local Variables:
+;; read-symbol-shorthands: (
+;;   ("and$"         . "cond-let--and$")
+;;   ("and>"         . "cond-let--and>")
+;;   ("and-let"      . "cond-let--and-let")
+;;   ("if-let"       . "cond-let--if-let")
+;;   ("when-let"     . "cond-let--when-let")
+;;   ("while-let"    . "cond-let--while-let")
+;;   ("match-string" . "match-string")
+;;   ("match-str"    . "match-string-no-properties"))
+;; End:
 ;;; magit-ediff.el ends here

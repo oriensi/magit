@@ -26,7 +26,9 @@ TAR      ?= tar
 SED      ?= sed
 
 EMACS      ?= emacs
-EMACS_ARGS ?=
+EMACS_ARGS ?= --eval "(progn \
+  (put 'if-let 'byte-obsolete-info nil) \
+  (put 'when-let 'byte-obsolete-info nil))"
 BATCH       = $(EMACS) -Q --batch $(EMACS_ARGS) $(LOAD_PATH)
 
 LISP_EXTRA_TARGETS ?= check-declare
@@ -37,28 +39,29 @@ MANUAL_HTML_ARGS ?= --css-ref /assets/page.css
 
 GITSTATS      ?= gitstats
 GITSTATS_DIR  ?= $(TOP)docs/stats
-GITSTATS_ARGS ?= -c style=https://magit.vc/assets/stats.css -c max_authors=999
-
-BUILD_MAGIT_LIBGIT ?= false
+GITSTATS_ARGS ?= -c style=https://magit.vc/assets/stats.css \
+                 -c max_authors=180 -c graph_max_authors=7
 
 ## Files #############################################################
 
 PKG       = magit
+PKGSTEXI  = magit magit-section
 PACKAGES  = magit magit-section git-commit
 
-TEXIPAGES = $(addsuffix .texi,$(filter-out git-commit,$(PACKAGES)))
-INFOPAGES = $(addsuffix .info,$(filter-out git-commit,$(PACKAGES)))
-HTMLFILES = $(addsuffix .html,$(filter-out git-commit,$(PACKAGES)))
-HTMLDIRS  = $(filter-out git-commit,$(PACKAGES))
-PDFFILES  = $(addsuffix .pdf,$(filter-out git-commit,$(PACKAGES)))
-EPUBFILES = $(addsuffix .epub,$(filter-out git-commit,$(PACKAGES)))
+ORGPAGES  = $(addsuffix .org,$(PKGSTEXI))
+TEXIPAGES = $(addsuffix .texi,$(PKGSTEXI))
+INFOPAGES = $(addsuffix .info,$(PKGSTEXI))
+HTMLFILES = $(addsuffix .html,$(PKGSTEXI))
+HTMLTOPS  = $(addsuffix /index.html,$(PKGSTEXI))
+HTMLDIRS  = $(PKGSTEXI)
+PDFFILES  = $(addsuffix .pdf,$(PKGSTEXI))
+EPUBFILES = $(addsuffix .epub,$(PKGSTEXI))
+
+# When making changes here, also update "<nongnu.git>/elpa-packages".
 
 ELS  = git-commit.el
 ELS += magit-section.el
 ELS += magit-base.el
-ifeq "$(BUILD_MAGIT_LIBGIT)" "true"
-ELS += magit-libgit.el
-endif
 ELS += magit-git.el
 ELS += magit-mode.el
 ELS += magit-margin.el
@@ -100,6 +103,7 @@ ELS += magit-ediff.el
 ELS += magit-gitignore.el
 ELS += magit-bundle.el
 ELS += magit-extras.el
+ELS += magit-dired.el
 ELS += git-rebase.el
 ELS += magit-bookmark.el
 ELCS = $(ELS:.el=.elc)
@@ -111,35 +115,9 @@ ELGS = magit-autoloads.el magit-version.el
 VERSION ?= $(shell \
   test -e $(TOP).git && \
   git describe --tags --abbrev=0 --always | cut -c2-)
-# TODO Deal with the fact that timestamps are no longer in sync.
-TIMESTAMP = 20230101
+REVDESC := $(shell test -e $(TOP).git && git describe --tags)
 
-COMPAT_VERSION        = 29.1.3.4
-DASH_VERSION          = 2.19.1
-GIT_COMMIT_VERSION    = $(VERSION)
-LIBGIT_VERSION        = 0
-MAGIT_VERSION         = $(VERSION)
-MAGIT_LIBGIT_VERSION  = $(VERSION)
-MAGIT_SECTION_VERSION = $(VERSION)
-SEQ_VERSION           = 2.24
-TRANSIENT_VERSION     = 0.3.6
-WITH_EDITOR_VERSION   = 3.0.5
-
-COMPAT_SNAPSHOT              = 29.1.3.4
-DASH_MELPA_SNAPSHOT          = 20221013
-GIT_COMMIT_MELPA_SNAPSHOT    = $(TIMESTAMP)
-LIBGIT_MELPA_SNAPSHOT        = 0
-MAGIT_MELPA_SNAPSHOT         = $(TIMESTAMP)
-MAGIT_LIBGIT_MELPA_SNAPSHOT  = $(TIMESTAMP)
-MAGIT_SECTION_MELPA_SNAPSHOT = $(TIMESTAMP)
-SEQ_MELPA_SNAPSHOT           = $(SEQ_VERSION)
-TRANSIENT_MELPA_SNAPSHOT     = 20230201
-WITH_EDITOR_MELPA_SNAPSHOT   = 20230118
-
-DEV_VERSION_SUFFIX = .50-git
-
-EMACS_VERSION        = 25.1
-LIBGIT_EMACS_VERSION = 26.1
+EMACS_VERSION = 28.1
 
 EMACSOLD := $(shell $(BATCH) --eval \
   "(and (version< emacs-version \"$(EMACS_VERSION)\") (princ \"true\"))")
@@ -170,18 +148,18 @@ ifeq "$(COMPAT_DIR)" ""
   COMPAT_DIR = $(TOP)../compat
 endif
 
-DASH_DIR ?= $(shell \
-  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/dash-[.0-9]*' 2> /dev/null | \
+COND_LET_DIR ?= $(shell \
+  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/cond-let-[.0-9]*' 2> /dev/null | \
   sort | tail -n 1)
-ifeq "$(DASH_DIR)" ""
-  DASH_DIR = $(TOP)../dash
+ifeq "$(COND_LET_DIR)" ""
+  COND_LET_DIR = $(TOP)../cond-let
 endif
 
-LIBGIT_DIR ?= $(shell \
-  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/libgit-[.0-9]*' 2> /dev/null | \
+LLAMA_DIR ?= $(shell \
+  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/llama-[.0-9]*' 2> /dev/null | \
   sort | tail -n 1)
-ifeq "$(LIBGIT_DIR)" ""
-  LIBGIT_DIR = $(TOP)../libgit
+ifeq "$(LLAMA_DIR)" ""
+  LLAMA_DIR = $(TOP)../llama
 endif
 
 SEQ_DIR ?= $(shell \
@@ -216,15 +194,18 @@ endif
 
 LOAD_PATH = -L $(TOP)lisp
 
-# When making changes here, then don't forget to adjust "Makefile",
-# ".github/workflows/test.yml", ".github/ISSUE_TEMPLATE/bug_report.md",
-# `magit-emacs-Q-command' and the "Installing from the Git Repository"
-# info node accordingly.  Also don't forget to "rgrep \b<pkg>\b".
+# When making changes here, then don't forget to adjust DEPS below,
+# ".github/ISSUE_TEMPLATE/bug_report.md", `magit-emacs-Q-command'
+# and the "Installing from the Git Repository" info node accordingly.
+# Also run "rgrep \b<another-package\b", to find other places where
+# a newly added dependency might have to be mentioned as well.  Also
+# remember that DEPS of packages that depend on Magit also have to
+# be updated.
 
 ifdef CYGPATH
   LOAD_PATH += -L $(shell cygpath --mixed $(COMPAT_DIR))
-  LOAD_PATH += -L $(shell cygpath --mixed $(DASH_DIR))
-  LOAD_PATH += -L $(shell cygpath --mixed $(LIBGIT_DIR))
+  LOAD_PATH += -L $(shell cygpath --mixed $(COND_LET_DIR))
+  LOAD_PATH += -L $(shell cygpath --mixed $(LLAMA_DIR))
   LOAD_PATH += -L $(shell cygpath --mixed $(SEQ_DIR))
   LOAD_PATH += -L $(shell cygpath --mixed $(TRANSIENT_DIR))
   LOAD_PATH += -L $(shell cygpath --mixed $(WITH_EDITOR_DIR))
@@ -233,8 +214,8 @@ ifdef CYGPATH
   endif
 else
   LOAD_PATH += -L $(COMPAT_DIR)
-  LOAD_PATH += -L $(DASH_DIR)
-  LOAD_PATH += -L $(LIBGIT_DIR)
+  LOAD_PATH += -L $(COND_LET_DIR)
+  LOAD_PATH += -L $(LLAMA_DIR)
   LOAD_PATH += -L $(SEQ_DIR)
   LOAD_PATH += -L $(TRANSIENT_DIR)
   LOAD_PATH += -L $(WITH_EDITOR_DIR)
@@ -254,18 +235,16 @@ endif
 # This isn't used by make, but is needed for the Compile ci workflow.
 
 DEPS  = compat
-DEPS += dash
+DEPS += cond-let
+DEPS += llama
 DEPS += seq
 DEPS += transient/lisp
-DEPS += vterm
 DEPS += with-editor/lisp
 
 ## Publish ###########################################################
 
 DOMAIN      ?= magit.vc
 CFRONT_DIST ?= E2LUHBKU1FBV02
-
-PUBLISH_TARGETS ?= html html-dir pdf
 
 DOCBOOK_XSL ?= /usr/share/xml/docbook/stylesheet/docbook-xsl/epub/docbook.xsl
 
