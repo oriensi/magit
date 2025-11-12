@@ -90,7 +90,7 @@ Create a section object of type CLASS, storing VALUE in its
 @code{value} slot, and insert the section at point.  CLASS is a
 subclass of `magit-section' or has the form @code{(eval FORM)}, in
 which case FORM is evaluated at runtime and should return a
-subclass.  In other places a sections class is oftern referred
+subclass.  In other places a sections class is often referred
 to as its "type".
 
 Many commands behave differently depending on the class of the
@@ -105,7 +105,7 @@ appropriate package prefix.  This works due to some undocumented
 kludges, which are not available to other packages.
 
 When optional HIDE is non-nil collapse the section body by
-default, i.e. when first creating the section, but not when
+default, i.e., when first creating the section, but not when
 refreshing the buffer.  Else expand it by default.  This can be
 overwritten using @code{magit-section-set-visibility-hook}.  When a
 section is recreated during a refresh, then the visibility of

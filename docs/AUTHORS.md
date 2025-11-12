@@ -1,7 +1,4 @@
-The following people have contributed to Magit, including the
-libraries `git-commit.el`, `magit-popup.el`, and `with-editor.el`
-which are distributed as separate Elpa packages.
-
+The following people have contributed to Magit.
 For statistics see https://magit.vc/stats/magit/authors.html.
 
 Authors
@@ -48,6 +45,7 @@ All Contributors
 - Alex Dunn
 - Alexey Voinov
 - Alex Kost
+- Alex Kreisher
 - Alex Ott
 - Allen Li
 - Andreas Fuchs
@@ -143,6 +141,7 @@ All Contributors
 - Evan Torrie
 - Evgkeni Sampelnikof
 - Eyal Lotem
+- Eyal Soha
 - Fabian Wiget
 - Felix Geller
 - Felix Yan
@@ -248,6 +247,7 @@ All Contributors
 - Mark Hepburn
 - Mark Karpov
 - Mark Oteiza
+- Markus Beppler
 - Martin Joerg
 - Martin Polden
 - Matthew Fluet
@@ -308,6 +308,7 @@ All Contributors
 - rabio
 - Radon Rosborough
 - Rafael Laboissiere
+- Rahul Rameshbabu
 - Raimon Grau
 - Ramkumar Ramachandra
 - Remco van 't Veer
@@ -339,6 +340,7 @@ All Contributors
 - Sergey Pashinin
 - Sergey Vinokurov
 - Servilio Afre Puentes
+- shoefone
 - Shuguang Sun
 - Siavash Askari Nasr
 - Silent Sphere
@@ -376,6 +378,7 @@ All Contributors
 - Troy Hinckley
 - Tsuyoshi Kitamoto
 - Tunc Uzlu
+- Ulrich Müller
 - Vineet Naik
 - Vitaly Ostashov
 - Vladimir Ivanov
@@ -398,4 +401,5 @@ All Contributors
 - Zach Latta
 - zakora
 - Zhu Zihao
+- ziggy
 - zilongshanren

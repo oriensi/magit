@@ -259,7 +259,7 @@ Also see option `magit-blame-styles'."
                  (file (and (not (derived-mode-p 'dired-mode))
                             (magit-file-relative-name
                              nil (not magit-buffer-file-name))))
-                 (line (format "%i,+1" (line-number-at-pos))))
+                 (line (format "%d,+1" (line-number-at-pos))))
              (cond (file (with-temp-buffer
                            (magit-with-toplevel
                              (magit-git-insert
@@ -400,10 +400,12 @@ modes is toggled, then this mode also gets toggled automatically.
 
 (defun magit-blame-put-keymap-before-view-mode ()
   "Put `magit-blame-read-only-mode' ahead of `view-mode' in `minor-mode-map-alist'."
-  (--when-let (assq 'magit-blame-read-only-mode
-                    (cl-member 'view-mode minor-mode-map-alist :key #'car))
+  (when-let ((entry (assq 'magit-blame-read-only-mode
+                          (cl-member 'view-mode minor-mode-map-alist
+                                     :key #'car))))
     (setq minor-mode-map-alist
-          (cons it (delq it minor-mode-map-alist))))
+          (cons entry
+                (delq entry minor-mode-map-alist))))
   (remove-hook 'view-mode-hook #'magit-blame-put-keymap-before-view-mode))
 
 (add-hook 'view-mode-hook #'magit-blame-put-keymap-before-view-mode)
@@ -509,7 +511,8 @@ modes is toggled, then this mode also gets toggled automatically.
                  (setf prev-file (magit-decode-git-path (match-string 2))))
                 ((looking-at "^\\([^ ]+\\) \\(.+\\)")
                  (push (cons (match-string 1)
-                             (match-string 2)) revinfo)))
+                             (match-string 2))
+                       revinfo)))
           (forward-line)))
       (when (and (eq type 'removal) prev-rev)
         (cl-rotatef orig-rev  prev-rev)
@@ -639,8 +642,8 @@ modes is toggled, then this mode also gets toggled automatically.
 (defun magit-blame--update-heading-overlay (ov)
   (overlay-put
    ov 'before-string
-   (--if-let (magit-blame--style-get 'heading-format)
-       (magit-blame--format-string ov it 'magit-blame-heading)
+   (if-let ((format (magit-blame--style-get 'heading-format)))
+       (magit-blame--format-string ov format 'magit-blame-heading)
      (and (magit-blame--style-get 'show-lines)
           (or (not (magit-blame--style-get 'margin-format))
               (save-excursion
@@ -861,15 +864,17 @@ then also kill the buffer."
 (defun magit-blame-next-chunk ()
   "Move to the next chunk."
   (interactive)
-  (--if-let (next-single-char-property-change (point) 'magit-blame-chunk)
-      (goto-char it)
+  (if-let ((next (next-single-char-property-change
+                  (point) 'magit-blame-chunk)))
+      (goto-char next)
     (user-error "No more chunks")))
 
 (defun magit-blame-previous-chunk ()
   "Move to the previous chunk."
   (interactive)
-  (--if-let (previous-single-char-property-change (point) 'magit-blame-chunk)
-      (goto-char it)
+  (if-let ((prev (previous-single-char-property-change
+                  (point) 'magit-blame-chunk)))
+      (goto-char prev)
     (user-error "No more chunks")))
 
 (defun magit-blame-next-chunk-same-commit (&optional previous)
@@ -885,9 +890,9 @@ then also kill the buffer."
                                      #'previous-single-char-property-change
                                    #'next-single-char-property-change)
                                  pos 'magit-blame-chunk)))
-            (--when-let (magit-blame--overlay-at pos)
+            (when-let ((o (magit-blame--overlay-at pos)))
               (when (equal (oref (magit-blame-chunk-at pos) orig-rev) rev)
-                (setq ov it)))))
+                (setq ov o)))))
         (if ov
             (goto-char (overlay-start ov))
           (user-error "No more chunks from same commit")))

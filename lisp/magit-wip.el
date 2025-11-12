@@ -110,7 +110,7 @@ is used as `branch-ref'."
 (define-minor-mode magit-wip-mode
   "Save uncommitted changes to work-in-progress refs.
 
-Whenever appropriate (i.e. when dataloss would be a possibility
+Whenever appropriate (i.e., when dataloss would be a possibility
 otherwise) this mode causes uncommitted changes to be committed
 to dedicated work-in-progress refs.
 
@@ -437,7 +437,8 @@ many \"branches\" of each wip ref are shown."
   (interactive
    (nconc (list (magit-completing-read
                  "Log branch and its wip refs"
-                 (-snoc (magit-list-local-branch-names) "HEAD")
+                 (nconc (magit-list-local-branch-names)
+                        (list "HEAD"))
                  nil t nil 'magit-revision-history
                  (or (magit-branch-at-point)
                      (magit-get-current-branch)

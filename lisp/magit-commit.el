@@ -314,9 +314,8 @@ depending on the value of option `magit-commit-squash-confirm'."
               (magit-with-editor
                 (magit-call-git
                  "commit" "--no-gpg-sign"
-                 (-remove-first
-                  (apply-partially #'string-prefix-p "--gpg-sign=")
-                  args)))
+                 (seq-remove (apply-partially #'string-prefix-p "--gpg-sign=")
+                             args)))
             (magit-run-git-with-editor "commit" args))
           t) ; The commit was created; used by below lambda.
       (let ((winconf (and magit-commit-show-diff
@@ -340,13 +339,13 @@ depending on the value of option `magit-commit-squash-confirm'."
           (apply #'magit-diff-staged nil (magit-diff-arguments)))))))
 
 (defun magit-commit-amend-assert (&optional commit)
-  (--when-let (magit-list-publishing-branches commit)
+  (when-let ((branches (magit-list-publishing-branches commit)))
     (let ((m1 "This commit has already been published to ")
           (m2 ".\nDo you really want to modify it"))
       (magit-confirm 'amend-published
         (concat m1 "%s" m2)
-        (concat m1 "%i public branches" m2)
-        nil it))))
+        (concat m1 "%d public branches" m2)
+        nil branches))))
 
 (defun magit-commit-assert (args &optional strict)
   (cond
@@ -369,9 +368,14 @@ depending on the value of option `magit-commit-squash-confirm'."
     (setq this-command #'magit-rebase-continue)
     (magit-run-git-sequencer "rebase" "--continue")
     nil)
-   ((and (file-exists-p (expand-file-name "MERGE_MSG" (magit-gitdir)))
-         (not (magit-anything-unstaged-p)))
-    (or args (list "--")))
+   ((file-exists-p (expand-file-name "MERGE_MSG" (magit-gitdir)))
+    (cond ((magit-anything-unmerged-p)
+           (user-error "Unresolved conflicts"))
+          ((and (magit-anything-unstaged-p)
+                (not (y-or-n-p
+                      "Proceed with merge despite unstaged changes? ")))
+           (user-error "Abort"))
+          ((or args (list "--")))))
    ((not (magit-anything-unstaged-p))
     (user-error "Nothing staged (or unstaged)"))
    (magit-commit-ask-to-stage
@@ -398,7 +402,7 @@ The current time is used as the initial minibuffer input and the
 original author or committer date is available as the previous
 history element.
 
-Both the author and the committer dates are changes, unless one
+Both the author and the committer dates are changed, unless one
 of the following is true, in which case only the committer date
 is updated:
 - You are not the author of the commit that is being reshelved.

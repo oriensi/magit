@@ -137,8 +137,9 @@ blame to center around the line point is on."
   (interactive
    (let (revision filename)
      (when (or current-prefix-arg
-               (not (setq revision "HEAD"
-                          filename (magit-file-relative-name nil 'tracked))))
+               (progn
+                 (setq revision "HEAD")
+                 (not (setq filename (magit-file-relative-name nil 'tracked)))))
        (setq revision (magit-read-branch-or-commit "Blame from revision"))
        (setq filename (magit-read-file-from-rev revision "Blame file")))
      (list revision filename
@@ -298,8 +299,7 @@ for a repository."
   "Open FILE with `dired-do-async-shell-command'.
 Interactively, open the file at point."
   (interactive (list (or (magit-file-at-point)
-                         (completing-read "Act on file: "
-                                          (magit-list-files)))))
+                         (magit-read-file "Act on file"))))
   (require 'dired-aux)
   (dired-do-async-shell-command
    (dired-read-shell-command "& on %s: " current-prefix-arg (list file))
@@ -468,7 +468,7 @@ points at it) otherwise."
         (if rebase
             (let ((magit--rebase-published-symbol 'edit-published))
               (magit-rebase-edit-commit rev (magit-rebase-arguments)))
-          (magit-checkout (or (magit-rev-branch rev) rev)))
+          (magit--checkout (or (magit-rev-branch rev) rev)))
         (unless (and buffer-file-name
                      (file-equal-p file buffer-file-name))
           (let ((blame-type (and magit-blame-mode magit-blame-type)))
@@ -684,8 +684,8 @@ stack.
 
 When reading the revision from the minibuffer, then it might not
 be possible to guess the correct repository.  When this command
-is called inside a repository (e.g. while composing a commit
-message), then that repository is used.  Otherwise (e.g. while
+is called inside a repository (e.g., while composing a commit
+message), then that repository is used.  Otherwise (e.g., while
 composing an email) then the repository recorded for the top
 element of the stack is used (even though we insert another
 revision).  If not called inside a repository and with an empty
@@ -731,7 +731,7 @@ the minibuffer too."
                     (string-replace "%N" idx eob-format)))
             (save-excursion
               (goto-char (point-max))
-              (skip-syntax-backward ">s-")
+              (skip-syntax-backward ">-")
               (beginning-of-line)
               (if (and comment-start (looking-at comment-start))
                   (while (looking-at comment-start)
@@ -781,7 +781,7 @@ argument."
        (replace-regexp-in-string
         (format "^\\%c.*\n?" (if (< (prefix-numeric-value arg) 0) ?+ ?-))
         "")
-       (replace-regexp-in-string "^[ \\+\\-]" "")))
+       (replace-regexp-in-string "^[ +-]" "")))
     (deactivate-mark))
    ((use-region-p)
     (call-interactively #'copy-region-as-kill))
@@ -859,7 +859,7 @@ abbreviated revision to the `kill-ring' and the
 The buffer is displayed using `magit-display-buffer', which see."
   (interactive (list (magit--read-repository-buffer
                       "Display magit buffer: ")))
-  (magit-display-buffer buffer))
+  (magit-display-buffer (get-buffer buffer)))
 
 ;;;###autoload
 (defun magit-switch-to-repository-buffer (buffer)
@@ -883,7 +883,7 @@ The buffer is displayed using `magit-display-buffer', which see."
   (switch-to-buffer-other-frame buffer))
 
 (defun magit--read-repository-buffer (prompt)
-  (if-let ((topdir (magit-toplevel)))
+  (if-let ((topdir (magit-rev-parse-safe "--show-toplevel")))
       (read-buffer
        prompt (magit-get-mode-buffer 'magit-status-mode) t
        (pcase-lambda (`(,_ . ,buf))
@@ -896,7 +896,8 @@ The buffer is displayed using `magit-display-buffer', which see."
                          (and buffer-file-name
                               (string-match-p git-commit-filename-regexp
                                               buffer-file-name)))
-                     (equal magit-buffer-topdir topdir))))))
+                     (equal (magit-rev-parse-safe "--show-toplevel")
+                            topdir))))))
     (user-error "Not inside a Git repository")))
 
 ;;; Miscellaneous

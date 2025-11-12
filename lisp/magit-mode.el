@@ -231,7 +231,7 @@ and Buffer Variables'."
 
 This affects certain commands such as `magit-show-commit' that
 are suffixes of the diff or log transient prefix commands, but
-only if they are invoked directly, i.e. *not* as a suffix.
+only if they are invoked directly, i.e., *not* as a suffix.
 
 Valid values are:
 
@@ -396,7 +396,7 @@ recommended value."
   "C-c C-c" 'magit-dispatch
   "C-c C-e" 'magit-edit-thing
   "C-c C-o" 'magit-browse-thing
-  "C-c C-w" 'magit-browse-thing
+  "C-c C-w" 'magit-copy-thing
   "C-w"     'magit-copy-section-value
   "M-w"     'magit-copy-buffer-revision
   "<remap> <previous-line>"      'magit-previous-line
@@ -405,36 +405,45 @@ recommended value."
   "<remap> <evil-next-line>"     'evil-next-visual-line)
 
 (defun magit-delete-thing ()
-  "This is a placeholder command.
-Where applicable, section-specific keymaps bind another command
-which deletes the thing at point."
+  "This is a placeholder command, which signals an error if called.
+Where applicable, other keymaps remap this command to another,
+which actually deletes the thing at point."
   (interactive)
   (user-error "There is no thing at point that could be deleted"))
 
 (defun magit-visit-thing ()
-  "This is a placeholder command.
-Where applicable, section-specific keymaps bind another command
-which visits the thing at point."
+  "This is a placeholder command, which may signal an error if called.
+Where applicable, other keymaps remap this command to another,
+which actually visits the thing at point."
   (interactive)
   (if (eq transient-current-command 'magit-dispatch)
       (call-interactively (key-binding (this-command-keys)))
     (user-error "There is no thing at point that could be visited")))
 
 (defun magit-edit-thing ()
-  "This is a placeholder command.
-Where applicable, section-specific keymaps bind another command
-which lets you edit the thing at point, likely in another buffer."
+  "This is a placeholder command, which may signal an error if called.
+Where applicable, other keymaps remap this command to another,
+which actually lets you edit the thing at point, likely in another
+buffer."
   (interactive)
   (if (eq transient-current-command 'magit-dispatch)
       (call-interactively (key-binding (this-command-keys)))
     (user-error "There is no thing at point that could be edited")))
 
 (defun magit-browse-thing ()
-  "This is a placeholder command.
-Where applicable, section-specific keymaps bind another command
-which visits the thing at point using `browse-url'."
+  "This is a placeholder command, which signals an error if called.
+Where applicable, other keymaps remap this command to another,
+which actually visits thing at point using `browse-url'."
   (interactive)
   (user-error "There is no thing at point that could be browsed"))
+
+(defun magit-copy-thing ()
+  "This is a placeholder command, which signals an error if called.
+Where applicable, other keymaps remap this command to another,
+which actually copies some representation of the thing at point
+to the kill ring."
+  (interactive)
+  (user-error "There is no thing at point that we know how to copy"))
 
 ;;;###autoload
 (defun magit-info ()
@@ -526,12 +535,11 @@ Magit is documented in info node `(magit)'."
   (setq-local revert-buffer-function #'magit-refresh-buffer)
   (setq-local bookmark-make-record-function #'magit--make-bookmark)
   (setq-local imenu-create-index-function #'magit--imenu-create-index)
+  (setq-local imenu-default-goto-function #'magit--imenu-goto-function)
   (setq-local isearch-filter-predicate #'magit-section--open-temporarily))
 
 ;;; Local Variables
 
-(defvar-local magit-buffer-gitdir nil)
-(defvar-local magit-buffer-topdir nil)
 (defvar-local magit-buffer-arguments nil)
 (defvar-local magit-buffer-diff-type nil)
 (defvar-local magit-buffer-diff-args nil)
@@ -600,8 +608,6 @@ The buffer's major-mode should derive from `magit-section-mode'."
       (setq magit-previous-section section)
       (funcall mode)
       (magit-xref-setup #'magit-setup-buffer-internal bindings)
-      (setq magit-buffer-gitdir (magit-gitdir))
-      (setq magit-buffer-topdir (magit-toplevel))
       (pcase-dolist (`(,var ,val) bindings)
         (set (make-local-variable var) val))
       (when created
@@ -805,7 +811,7 @@ If `visible', then only consider buffers on all visible frames.
 If `selected' or t, then only consider buffers on the selected
   frame.
 If a frame, then only consider buffers on that frame."
-  (let ((topdir (magit--toplevel-safe 'nocache)))
+  (let ((topdir (magit--toplevel-safe)))
     (cl-flet* ((b (buffer)
                  (with-current-buffer buffer
                    (and (eq major-mode mode)
@@ -827,7 +833,7 @@ If a frame, then only consider buffers on that frame."
         ((guard (framep frame)) (seq-some #'w (window-list frame)))))))
 
 (defun magit-generate-new-buffer (mode &optional value directory)
-  (let* ((default-directory (or directory (magit--toplevel-safe 'nocache)))
+  (let* ((default-directory (or directory (magit--toplevel-safe)))
          (name (funcall magit-generate-buffer-name-function mode value))
          (buffer (generate-new-buffer name)))
     (with-current-buffer buffer
@@ -967,10 +973,10 @@ Run hooks `magit-pre-refresh-hook' and `magit-post-refresh-hook'."
                  (magit-refresh-buffer))
                 ((derived-mode-p 'tabulated-list-mode)
                  (revert-buffer)))
-          (--when-let (and magit-refresh-status-buffer
-                           (not (derived-mode-p 'magit-status-mode))
-                           (magit-get-mode-buffer 'magit-status-mode))
-            (with-current-buffer it
+          (when-let ((buffer (and magit-refresh-status-buffer
+                                  (not (derived-mode-p 'magit-status-mode))
+                                  (magit-get-mode-buffer 'magit-status-mode))))
+            (with-current-buffer buffer
               (magit-refresh-buffer)))
           (magit-run-hook-with-benchmark 'magit-post-refresh-hook)
           (when magit-refresh-verbose
@@ -1079,8 +1085,9 @@ If you are not satisfied with Magit's performance, then you
 should obviously not add this function to that hook."
   (when (and (not magit--disable-save-buffers)
              (magit-inside-worktree-p t))
-    (--when-let (ignore-errors (magit-get-mode-buffer 'magit-status-mode))
-      (add-to-list 'magit-after-save-refresh-buffers it)
+    (when-let ((buffer (ignore-errors
+                         (magit-get-mode-buffer 'magit-status-mode))))
+      (add-to-list 'magit-after-save-refresh-buffers buffer)
       (add-hook 'post-command-hook #'magit-after-save-refresh-buffers))))
 
 (defun magit-maybe-save-repository-buffers ()
@@ -1202,7 +1209,9 @@ Later, when the buffer is buried, it may be restored by
       (set-window-configuration winconf)
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
-          (setq magit-previous-window-configuration nil))))))
+          (setq magit-previous-window-configuration nil)))
+      (set-buffer (with-selected-window (selected-window)
+                    (current-buffer))))))
 
 ;;; Buffer History
 
@@ -1443,6 +1452,17 @@ mentioned caches completely."
        ((string-match " ([0-9]+)\\'" heading)
         (substring heading 0 (match-beginning 0)))
        (t heading)))))
+
+(defun magit--imenu-goto-function (_name position &rest _rest)
+  "Go to the section at POSITION.
+Make sure it is visible, by showing its ancestors where
+necessary.  For use as `imenu-default-goto-function' in
+`magit-mode' buffers."
+  (goto-char position)
+  (let ((section (magit-current-section)))
+    (while (setq section (oref section parent))
+      (when (oref section hidden)
+        (magit-section-show section)))))
 
 ;;; Bookmark support
 

@@ -15,6 +15,7 @@
 ;; Package-Requires: (
 ;;     (emacs "25.1")
 ;;     (compat "29.1.3.4")
+;;     (seq "2.24")
 ;;     (transient "0.3.6")
 ;;     (with-editor "3.0.5"))
 
@@ -45,7 +46,7 @@
 ;; actually passing it a message.  Git then invokes the `$GIT_EDITOR'
 ;; (or if that is undefined `$EDITOR') asking the user to provide the
 ;; message by editing the file ".git/COMMIT_EDITMSG" (or another file
-;; in that directory, e.g. ".git/MERGE_MSG" for merge commits).
+;; in that directory, e.g., ".git/MERGE_MSG" for merge commits).
 
 ;; When `global-git-commit-mode' is enabled, which it is by default,
 ;; then opening such a file causes the features described below, to
@@ -76,7 +77,7 @@
 ;; Aborting the commit does not cause the message to be lost, but
 ;; relying solely on the file not being tampered with is risky.  This
 ;; package additionally stores all aborted messages for the duration
-;; of the current session (i.e. until you close Emacs).  To get back
+;; of the current session (i.e., until you close Emacs).  To get back
 ;; an aborted message use M-p and M-n while editing a message.
 ;;
 ;;   M-p      Replace the buffer contents with the previous message
@@ -119,6 +120,12 @@
 
 (require 'compat)
 (require 'subr-x)
+
+(when (and (featurep' seq)
+           (not (fboundp 'seq-keep)))
+  (unload-feature 'seq 'force))
+(require 'seq)
+
 (require 'log-edit)
 (require 'ring)
 (require 'rx)
@@ -204,8 +211,7 @@ The major mode configured here is turned on by the minor mode
     git-commit-setup-changelog-support
     git-commit-turn-on-auto-fill
     git-commit-propertize-diff
-    bug-reference-mode
-    with-editor-usage-message)
+    bug-reference-mode)
   "Hook run at the end of `git-commit-setup'."
   :group 'git-commit
   :type 'hook
@@ -217,8 +223,7 @@ The major mode configured here is turned on by the minor mode
              git-commit-turn-on-orglink
              git-commit-turn-on-flyspell
              git-commit-propertize-diff
-             bug-reference-mode
-             with-editor-usage-message))
+             bug-reference-mode))
 
 (defcustom git-commit-post-finish-hook nil
   "Hook run after the user finished writing a commit message.
@@ -448,16 +453,16 @@ This is only used if Magit is available."
 (add-to-list 'with-editor-file-name-history-exclude git-commit-filename-regexp)
 
 (defun git-commit-setup-font-lock-in-buffer ()
-  (and buffer-file-name
-       (string-match-p git-commit-filename-regexp buffer-file-name)
-       (git-commit-setup-font-lock)))
+  (when (and buffer-file-name
+             (string-match-p git-commit-filename-regexp buffer-file-name))
+    (git-commit-setup-font-lock)))
 
 (add-hook 'after-change-major-mode-hook #'git-commit-setup-font-lock-in-buffer)
 
 (defun git-commit-setup-check-buffer ()
-  (and buffer-file-name
-       (string-match-p git-commit-filename-regexp buffer-file-name)
-       (git-commit-setup)))
+  (when (and buffer-file-name
+             (string-match-p git-commit-filename-regexp buffer-file-name))
+    (git-commit-setup)))
 
 (defvar git-commit-mode)
 
@@ -490,11 +495,28 @@ This is only used if Magit is available."
 (when (eq system-type 'windows-nt)
   (add-hook 'find-file-not-found-functions #'git-commit-file-not-found))
 
-(defconst git-commit-usage-message "\
+(defconst git-commit-default-usage-message "\
 Type \\[with-editor-finish] to finish, \
 \\[with-editor-cancel] to cancel, and \
 \\[git-commit-prev-message] and \\[git-commit-next-message] \
 to recover older messages")
+
+(defvar git-commit-usage-message git-commit-default-usage-message
+  "Message displayed when editing a commit message.
+When this is nil, then `with-editor-usage-message' is displayed
+instead.  One of these messages has to be displayed; otherwise
+the user gets to see the message displayed by `server-execute'.
+That message is misleading and because we cannot prevent it from
+being displayed, we have to immediately show another message to
+prevent the user from seeing it.")
+
+(defvar git-commit-header-line-format nil
+  "If non-nil, header line format used by `git-commit-mode'.
+Used as the local value of `header-line-format', in buffer using
+`git-commit-mode'.  If it is a string, then it is passed through
+`substitute-command-keys' first.  A useful setting may be:
+  (setq git-commit-header-line-format git-commit-default-usage-message)
+  (setq git-commit-usage-message nil) ; show a shorter message")
 
 (defun git-commit-setup ()
   (when (fboundp 'magit-toplevel)
@@ -519,19 +541,25 @@ to recover older messages")
       (hack-dir-local-variables)
       (hack-local-variables-apply)))
   (when git-commit-major-mode
-    (let ((auto-mode-alist (list (cons (concat "\\`"
-                                               (regexp-quote buffer-file-name)
-                                               "\\'")
-                                       git-commit-major-mode)))
+    (let ((auto-mode-alist
+           ;; `set-auto-mode--apply-alist' removes the remote part from
+           ;; the file-name before looking it up in `auto-mode-alist'.
+           ;; For our temporary entry to be found, we have to modify the
+           ;; file-name the same way.
+           (list (cons (concat "\\`"
+                               (regexp-quote
+                                (or (file-remote-p buffer-file-name 'localname)
+                                    buffer-file-name))
+                               "\\'")
+                       git-commit-major-mode)))
           ;; The major-mode hook might want to consult these minor
           ;; modes, while the minor-mode hooks might want to consider
           ;; the major mode.
           (git-commit-mode t)
           (with-editor-mode t))
       (normal-mode t)))
-  ;; Show our own message using our hook.
+  ;; Below we instead explicitly show a message.
   (setq with-editor-show-usage nil)
-  (setq with-editor-usage-message git-commit-usage-message)
   (unless with-editor-mode
     ;; Maybe already enabled when using `shell-command' or an Emacs shell.
     (with-editor-mode 1))
@@ -571,6 +599,12 @@ to recover older messages")
       (open-line 1)))
   (with-demoted-errors "Error running git-commit-setup-hook: %S"
     (run-hooks 'git-commit-setup-hook))
+  (when git-commit-usage-message
+    (setq with-editor-usage-message git-commit-usage-message))
+  (with-editor-usage-message)
+  (when-let ((format git-commit-header-line-format))
+    (setq header-line-format
+          (if (stringp format) (substitute-command-keys format) format)))
   (set-buffer-modified-p nil))
 
 (defun git-commit-run-post-finish-hook (previous)
@@ -771,12 +805,13 @@ Save current message first."
       (unless (eq (char-before) ?\n)
         (insert ?\n))
       (setq str (buffer-string)))
-    (unless (string-match "\\`[ \t\n\r]*\\'" str)
-      (when (string-match "\\`\n\\{2,\\}" str)
-        (setq str (replace-match "\n" t t str)))
-      (when (string-match "\n\\{2,\\}\\'" str)
-        (setq str (replace-match "\n" t t str)))
-      str)))
+    (and (not (string-match "\\`[ \t\n\r]*\\'" str))
+         (progn
+           (when (string-match "\\`\n\\{2,\\}" str)
+             (setq str (replace-match "\n" t t str)))
+           (when (string-match "\n\\{2,\\}\\'" str)
+             (setq str (replace-match "\n" t t str)))
+           str))))
 
 ;;; Utilities
 
@@ -789,7 +824,10 @@ Save current message first."
 
 (transient-define-prefix git-commit-insert-pseudo-header ()
   "Insert a commit message pseudo header."
-  [["Insert ... by yourself"
+  [[:description (lambda ()
+                   (cond (prefix-arg
+                          "Insert ... by someone ")
+                         ("Insert ... by yourself")))
     ("a"   "Ack"          git-commit-ack)
     ("m"   "Modified"     git-commit-modified)
     ("r"   "Reviewed"     git-commit-review)
@@ -804,27 +842,31 @@ Save current message first."
 
 (defun git-commit-ack (name mail)
   "Insert a header acknowledging that you have looked at the commit."
-  (interactive (git-commit-self-ident))
+  (interactive (git-commit-get-ident "Acked-by"))
   (git-commit-insert-header "Acked-by" name mail))
 
 (defun git-commit-modified (name mail)
   "Insert a header to signal that you have modified the commit."
-  (interactive (git-commit-self-ident))
+  (interactive (git-commit-get-ident "Modified-by"))
   (git-commit-insert-header "Modified-by" name mail))
 
 (defun git-commit-review (name mail)
-  "Insert a header acknowledging that you have reviewed the commit."
-  (interactive (git-commit-self-ident))
+  "Insert a header acknowledging that you have reviewed the commit.
+With a prefix argument, prompt for another person who performed a
+review."
+  (interactive (git-commit-get-ident "Reviewed-by"))
   (git-commit-insert-header "Reviewed-by" name mail))
 
 (defun git-commit-signoff (name mail)
-  "Insert a header to sign off the commit."
-  (interactive (git-commit-self-ident))
+  "Insert a header to sign off the commit.
+With a prefix argument, prompt for another person who signed off."
+  (interactive (git-commit-get-ident "Signed-off-by"))
   (git-commit-insert-header "Signed-off-by" name mail))
 
 (defun git-commit-test (name mail)
-  "Insert a header acknowledging that you have tested the commit."
-  (interactive (git-commit-self-ident))
+  "Insert a header acknowledging that you have tested the commit.
+With a prefix argument, prompt for another person who tested."
+  (interactive (git-commit-get-ident "Tested-by"))
   (git-commit-insert-header "Tested-by" name mail))
 
 (defun git-commit-cc (name mail)
@@ -852,25 +894,37 @@ Save current message first."
   (interactive (git-commit-read-ident "Co-developed-by"))
   (git-commit-insert-header "Co-developed-by" name mail))
 
-(defun git-commit-self-ident ()
-  (list (or (getenv "GIT_AUTHOR_NAME")
-            (getenv "GIT_COMMITTER_NAME")
-            (with-demoted-errors "Error running 'git config user.name': %S"
-              (car (process-lines
-                    (git-commit-executable) "config" "user.name")))
-            user-full-name
-            (read-string "Name: "))
-        (or (getenv "GIT_AUTHOR_EMAIL")
-            (getenv "GIT_COMMITTER_EMAIL")
-            (getenv "EMAIL")
-            (with-demoted-errors "Error running 'git config user.email': %S"
-              (car (process-lines
-                    (git-commit-executable) "config" "user.email")))
-            (read-string "Email: "))))
+(defun git-commit-get-ident (&optional prompt)
+  "Return name and email of the user or read another name and email.
+If PROMPT and `current-prefix-arg' are both non-nil, read name
+and email using `git-commit-read-ident' (which see), otherwise
+return name and email of the current user (you)."
+  (if (and prompt current-prefix-arg)
+      (git-commit-read-ident prompt)
+    (list (or (getenv "GIT_AUTHOR_NAME")
+              (getenv "GIT_COMMITTER_NAME")
+              (with-demoted-errors "Error running 'git config user.name': %S"
+                (car (process-lines
+                      (git-commit-executable) "config" "user.name")))
+              user-full-name
+              (read-string "Name: "))
+          (or (getenv "GIT_AUTHOR_EMAIL")
+              (getenv "GIT_COMMITTER_EMAIL")
+              (getenv "EMAIL")
+              (with-demoted-errors "Error running 'git config user.email': %S"
+                (car (process-lines
+                      (git-commit-executable) "config" "user.email")))
+              (read-string "Email: ")))))
+
+(defalias 'git-commit-self-ident #'git-commit-get-ident)
 
 (defvar git-commit-read-ident-history nil)
 
 (defun git-commit-read-ident (prompt)
+  "Read a name and email, prompting with PROMPT, and return them.
+If Magit is available, read them using a single prompt, offering
+past commit authors as completion candidates.  The input must
+have the form \"NAME <EMAIL>\"."
   (if (require 'magit-git nil t)
       (let ((str (magit-completing-read
                   prompt
@@ -890,7 +944,7 @@ Save current message first."
   (setq header (format "%s: %s <%s>" header name email))
   (save-excursion
     (goto-char (point-max))
-    (cond ((re-search-backward "^[-a-zA-Z]+: [^<]+? <[^>]+>" nil t)
+    (cond ((re-search-backward "^[-a-zA-Z]+: [^<\n]+? <[^>\n]+>" nil t)
            (end-of-line)
            (insert ?\n header)
            (unless (= (char-after) ?\n)
@@ -1048,8 +1102,16 @@ Added to `font-lock-extend-region-functions'."
                              (buffer-substring (point) (line-end-position)))))
                     "#"))
     (setq-local comment-start-skip (format "^%s+[\s\t]*" comment-start))
+    (setq-local comment-end "")
     (setq-local comment-end-skip "\n")
     (setq-local comment-use-syntax nil)
+    (when (and (derived-mode-p 'markdown-mode)
+               (fboundp 'markdown-fill-paragraph))
+      (setq-local fill-paragraph-function
+                  (lambda (&optional justify)
+                    (and (not (= (char-after (line-beginning-position))
+                                 (aref comment-start 0)))
+                         (markdown-fill-paragraph justify)))))
     (setq-local git-commit--branch-name-regexp
                 (if (and (featurep 'magit-git)
                          ;; When using cygwin git, we may end up in a
@@ -1109,7 +1171,7 @@ Added to `font-lock-extend-region-functions'."
 (define-derived-mode git-commit-elisp-text-mode text-mode "ElText"
   "Major mode for editing commit messages of elisp projects.
 This is intended for use as `git-commit-major-mode' for projects
-that expect `symbols' to look like this.  I.e. like they look in
+that expect `symbols' to look like this.  I.e., like they look in
 Elisp doc-strings, including this one.  Unlike in doc-strings,
 \"strings\" also look different than the other text."
   (setq font-lock-defaults '(git-commit-elisp-text-mode-keywords)))

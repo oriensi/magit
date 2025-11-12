@@ -100,12 +100,12 @@ The `:sort' function has a weird interface described in the
 docstring of `tabulated-list--get-sort'.  Alternatively `<' and
 `magit-repolist-version<' can be used as those functions are
 automatically replaced with functions that satisfy the interface.
-Set `:sort' to nil to inhibit sorting; if unspecifed, then the
+Set `:sort' to nil to inhibit sorting; if unspecified, then the
 column is sortable using the default sorter.
 
 You may wish to display a range of numeric columns using just one
 character per column and without any padding between columns, in
-which case you should use an appropriat HEADER, set WIDTH to 1,
+which case you should use an appropriate HEADER, set WIDTH to 1,
 and set `:pad-right' to 0.  \"+\" is substituted for numbers higher
 than 9."
   :package-version '(magit . "2.8.0")
@@ -172,9 +172,9 @@ and also setting this variable to t will lead to tears."
    ("s" magit-submodule-synchronize)
    ("d" magit-submodule-unpopulate)
    ("k" "Remove" magit-submodule-remove)]
-  ["All modules actions"
-   ("l" "List all modules"  magit-list-submodules)
-   ("f" "Fetch all modules" magit-fetch-modules)])
+  ["Populated modules actions"
+   ("l" "List modules"  magit-list-submodules)
+   ("f" "Fetch modules" magit-fetch-modules)])
 
 (defun magit-submodule-arguments (&rest filters)
   (--filter (and (member it filters) it)
@@ -377,7 +377,7 @@ are additional safety precautions in place, so you might be able
 to recover from making a mistake here, but don't count on it."
   (interactive
    (list (if-let ((modules (magit-region-values 'magit-module-section t)))
-             (magit-confirm 'remove-modules nil "Remove %i modules" nil modules)
+             (magit-confirm 'remove-modules nil "Remove %d modules" nil modules)
            (list (magit-read-module-path "Remove module")))
          (magit-submodule-arguments "--force")
          current-prefix-arg))
@@ -388,16 +388,16 @@ to recover from making a mistake here, but don't count on it."
   (magit-with-toplevel
     (when-let
         ((modified
-          (-filter (lambda (module)
-                     (let ((default-directory (file-name-as-directory
-                                               (expand-file-name module))))
-                       (and (cddr (directory-files default-directory))
-                            (magit-anything-modified-p))))
-                   modules)))
+          (seq-filter (lambda (module)
+                        (let ((default-directory (file-name-as-directory
+                                                  (expand-file-name module))))
+                          (and (cddr (directory-files default-directory))
+                               (magit-anything-modified-p))))
+                      modules)))
       (if (member "--force" args)
           (if (magit-confirm 'remove-dirty-modules
                 "Remove dirty module %s"
-                "Remove %i dirty modules"
+                "Remove %d dirty modules"
                 t modified)
               (dolist (module modified)
                 (let ((default-directory (file-name-as-directory
@@ -424,7 +424,7 @@ to recover from making a mistake here, but don't count on it."
         (when (and trash-gitdirs
                    (magit-confirm 'trash-module-gitdirs
                      "Trash gitdir of module %s"
-                     "Trash gitdirs of %i modules"
+                     "Trash gitdirs of %d modules"
                      t modules))
           (dolist (module modules)
             (if-let ((name (cadr (assoc module alist))))
@@ -481,10 +481,10 @@ or, failing that, the abbreviated HEAD commit hash."
 (defun magit--insert-modules-overview (&optional _section)
   (magit-with-toplevel
     (let* ((modules (magit-list-module-paths))
-           (path-format (format "%%-%is "
+           (path-format (format "%%-%ds "
                                 (min (apply #'max (mapcar #'length modules))
                                      (/ (window-width) 2))))
-           (branch-format (format "%%-%is " (min 25 (/ (window-width) 3)))))
+           (branch-format (format "%%-%ds " (min 25 (/ (window-width) 3)))))
       (dolist (module modules)
         (let ((default-directory
                (expand-file-name (file-name-as-directory module))))
@@ -493,18 +493,19 @@ or, failing that, the abbreviated HEAD commit hash."
                                 'font-lock-face 'magit-diff-file-heading))
             (if (not (file-exists-p ".git"))
                 (insert "(unpopulated)")
-              (insert (format
-                       branch-format
-                       (--if-let (magit-get-current-branch)
-                           (propertize it 'font-lock-face 'magit-branch-local)
-                         (propertize "(detached)" 'font-lock-face 'warning))))
-              (--if-let (magit-git-string "describe" "--tags")
+              (insert
+               (format
+                branch-format
+                (if-let ((branch (magit-get-current-branch)))
+                    (propertize branch 'font-lock-face 'magit-branch-local)
+                  (propertize "(detached)" 'font-lock-face 'warning))))
+              (if-let ((desc (magit-git-string "describe" "--tags")))
                   (progn (when (and magit-modules-overview-align-numbers
-                                    (string-match-p "\\`[0-9]" it))
+                                    (string-match-p "\\`[0-9]" desc))
                            (insert ?\s))
-                         (insert (propertize it 'font-lock-face 'magit-tag)))
-                (--when-let (magit-rev-format "%h")
-                  (insert (propertize it 'font-lock-face 'magit-hash)))))
+                         (insert (propertize desc 'font-lock-face 'magit-tag)))
+                (when-let ((abbrev (magit-rev-format "%h")))
+                  (insert (propertize abbrev 'font-lock-face 'magit-hash)))))
             (insert ?\n))))))
   (insert ?\n))
 
@@ -625,7 +626,7 @@ These sections can be expanded to show the respective commits."
 
 ;;;###autoload
 (defun magit-list-submodules ()
-  "Display a list of the current repository's submodules."
+  "Display a list of the current repository's populated submodules."
   (interactive)
   (magit-submodule-list-setup magit-submodule-list-columns))
 
@@ -658,22 +659,23 @@ These sections can be expanded to show the respective commits."
 
 (defun magit-submodule-list-refresh ()
   (setq tabulated-list-entries
-        (-keep (lambda (module)
-                 (let ((default-directory
-                        (expand-file-name (file-name-as-directory module))))
-                   (and (file-exists-p ".git")
-                        (or (not magit-submodule-list-predicate)
-                            (funcall magit-submodule-list-predicate module))
-                        (list module
-                              (vconcat
-                               (mapcar (pcase-lambda (`(,title ,width ,fn ,props))
-                                         (or (funcall fn `((:path  ,module)
-                                                           (:title ,title)
-                                                           (:width ,width)
-                                                           ,@props))
-                                             ""))
-                                       magit-repolist-columns))))))
-               (magit-list-module-paths)))
+        (seq-keep
+         (lambda (module)
+           (let ((default-directory
+                  (expand-file-name (file-name-as-directory module))))
+             (and (file-exists-p ".git")
+                  (or (not magit-submodule-list-predicate)
+                      (funcall magit-submodule-list-predicate module))
+                  (list module
+                        (vconcat
+                         (mapcar (pcase-lambda (`(,title ,width ,fn ,props))
+                                   (or (funcall fn `((:path  ,module)
+                                                     (:title ,title)
+                                                     (:width ,width)
+                                                     ,@props))
+                                       ""))
+                                 magit-repolist-columns))))))
+         (magit-list-module-paths)))
   (message "Listing submodules...")
   (tabulated-list-init-header)
   (tabulated-list-print t)

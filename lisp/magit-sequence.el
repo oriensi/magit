@@ -281,8 +281,8 @@ the process manually."
     (unless (magit-branch-p dst)
       (let ((magit-process-raise-error t))
         (magit-call-git "branch" dst start-point))
-      (--when-let (magit-get-indirect-upstream-branch start-point)
-        (magit-call-git "branch" "--set-upstream-to" it dst)))
+      (when-let ((upstream (magit-get-indirect-upstream-branch start-point)))
+        (magit-call-git "branch" "--set-upstream-to" upstream dst)))
     (unless (equal dst current)
       (let ((magit-process-raise-error t))
         (magit-call-git "checkout" dst)))
@@ -335,12 +335,11 @@ the process manually."
                       (list commits))))
     (magit-run-git-sequencer
      (if revert "revert" "cherry-pick")
-     (pcase-let ((`(,merge ,non-merge)
-                  (-separate #'magit-merge-commit-p commits)))
+     (let ((merges (seq-filter #'magit-merge-commit-p commits)))
        (cond
-        ((not merge)
+        ((not merges)
          (--remove (string-prefix-p "--mainline=" it) args))
-        (non-merge
+        ((cl-set-difference commits merges :test #'equal)
          (user-error "Cannot %s merge and non-merge commits at once"
                      command))
         ((--first (string-prefix-p "--mainline=" it) args)
@@ -726,7 +725,7 @@ START has to be selected from a list of recent commits."
             (m2 ".\nDo you really want to modify them"))
         (magit-confirm (or magit--rebase-published-symbol 'rebase-published)
           (concat m1 "%s" m2)
-          (concat m1 "%i public branches" m2)
+          (concat m1 "%d public branches" m2)
           nil branches))
       (push (magit-toplevel) magit--rebase-public-edit-confirmed)))
   (if (and (magit-git-lines "rev-list" "--merges" (concat since "..HEAD"))
@@ -976,7 +975,7 @@ If no such sequence is in progress, do nothing."
 (defun magit-rebase--todo ()
   "Return `git-rebase-action' instances for remaining rebase actions.
 These are ordered in that the same way they'll be sorted in the
-status buffer (i.e. the reverse of how they will be applied)."
+status buffer (i.e., the reverse of how they will be applied)."
   (let ((comment-start (or (magit-get "core.commentChar") "#"))
         lines)
     (with-temp-buffer
@@ -1035,7 +1034,7 @@ status buffer (i.e. the reverse of how they will be applied)."
 
 (defun magit-rebase-patches ()
   (directory-files (expand-file-name "rebase-apply" (magit-gitdir))
-                   t "^[0-9]\\{4\\}$"))
+                   t "\\`[0-9]\\{4\\}\\'"))
 
 (defun magit-sequence-insert-sequence (stop onto &optional orig)
   (let ((head (magit-rev-parse "HEAD")) done)
@@ -1043,8 +1042,8 @@ status buffer (i.e. the reverse of how they will be applied)."
     (setq done (magit-git-lines "log" "--format=%H" (concat onto "..HEAD")))
     (when (and stop (not (member (magit-rev-parse stop) done)))
       (let ((id (magit-patch-id stop)))
-        (--if-let (--first (equal (magit-patch-id it) id) done)
-            (setq stop it)
+        (if-let ((matched (--first (equal (magit-patch-id it) id) done)))
+            (setq stop matched)
           (cond
            ((--first (magit-rev-equal it stop) done)
             ;; The commit's testament has been executed.

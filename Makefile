@@ -204,6 +204,7 @@ define set_package_requires_nongnu
 (--update-package "lisp/git-commit.el" "$(GIT_COMMIT_VERSION)"
 `((emacs ,emacs-version) ;`
   (compat ,compat-version)
+  (seq ,seq-version)
   (transient ,transient-version)
   (with-editor ,with-editor-version)))
 
@@ -213,6 +214,7 @@ define set_package_requires_nongnu
   (dash ,dash-version)
   (git-commit ,git-commit-version)
   (magit-section ,magit-section-version)
+  (seq ,seq-version)
   (transient ,transient-version)
   (with-editor ,with-editor-version)))
 
@@ -220,12 +222,14 @@ define set_package_requires_nongnu
 `((emacs "$(LIBGIT_EMACS_VERSION)") ;`
   (compat ,compat-version)
   (libgit ,libgit-version)
+  (seq ,seq-version)
   (magit ,magit-version)))
 
 (--update-package "lisp/magit-section.el" "$(MAGIT_SECTION_VERSION)"
 `((emacs ,emacs-version) ;`
   (compat ,compat-version)
-  (dash ,dash-version)))
+  (dash ,dash-version)
+  (seq ,seq-version)))
 endef
 export set_package_requires_nongnu
 
@@ -255,6 +259,7 @@ define set_package_requires_melpa
     (dash          %S)
     (git-commit    %S)
     (magit-section %S)
+    (seq           %S)
     (transient     %S)
     (with-editor   %S))
   :homepage \"https://magit.vc\"
@@ -264,6 +269,7 @@ define set_package_requires_melpa
     dash-version
     git-commit-version
     magit-section-version
+    seq-version
     transient-version
     with-editor-version)))
 
@@ -306,6 +312,7 @@ define set_package_versions
 (magit-version "$(MAGIT_VERSION)")
 (magit-libgit-version "$(MAGIT_LIBGIT_VERSION)")
 (magit-section-version "$(MAGIT_SECTION_VERSION)")
+(seq-version "$(SEQ_VERSION)")
 (transient-version "$(TRANSIENT_VERSION)")
 (with-editor-version "$(WITH_EDITOR_VERSION)")
 endef
@@ -320,6 +327,7 @@ define set_package_snapshots
 (magit-version "$(MAGIT_MELPA_SNAPSHOT)")
 (magit-libgit-version "$(MAGIT_LIBGIT_MELPA_SNAPSHOT)")
 (magit-section-version "$(MAGIT_SECTION_MELPA_SNAPSHOT)")
+(seq-version "$(SEQ_MELPA_SNAPSHOT)")
 (transient-version "$(TRANSIENT_MELPA_SNAPSHOT)")
 (with-editor-version "$(WITH_EDITOR_MELPA_SNAPSHOT)")
 endef

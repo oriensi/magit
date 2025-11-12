@@ -41,6 +41,15 @@
 (require 'eieio)
 (require 'subr-x)
 
+;; For older Emacs releases we depend on an updated `seq' release from
+;; GNU ELPA, for `seq-keep'.  Unfortunately something else may already
+;; have required `seq', before `package' had a chance to put the more
+;; recent version earlier on the `load-path'.
+(when (and (featurep' seq)
+           (not (fboundp 'seq-keep)))
+  (unload-feature 'seq 'force))
+(require 'seq)
+
 (require 'crm)
 
 (require 'magit-section)
@@ -86,26 +95,7 @@ alphabetical order, depending on your version of Ivy."
     (magit-stash-branch-here  nil t)
     (magit-stash-format-patch nil t)
     (magit-stash-drop         nil ask)
-    (magit-stash-pop          nil ask)
-    (forge-browse-dwim        nil t)
-    (forge-browse-commit      nil t)
-    (forge-browse-branch      nil t)
-    (forge-browse-remote      nil t)
-    (forge-browse-issue       nil t)
-    (forge-browse-pullreq     nil t)
-    (forge-edit-topic-title   nil t)
-    (forge-edit-topic-state   nil t)
-    (forge-edit-topic-draft   nil t)
-    (forge-edit-topic-milestone nil t)
-    (forge-edit-topic-labels  nil t)
-    (forge-edit-topic-marks   nil t)
-    (forge-edit-topic-assignees nil t)
-    (forge-edit-topic-review-requests nil t)
-    (forge-edit-topic-note    nil t)
-    (forge-pull-pullreq       nil t)
-    (forge-visit-issue        nil t)
-    (forge-visit-pullreq      nil t)
-    (forge-visit-topic        nil t))
+    (magit-stash-pop          nil ask))
   "When not to offer alternatives and ask for confirmation.
 
 Many commands by default ask the user to select from a list of
@@ -168,6 +158,7 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
     (const remove-modules)
     (const remove-dirty-modules)
     (const trash-module-gitdirs)
+    (const stash-apply-3way)
     (const kill-process)
     (const safe-with-wip)))
 
@@ -183,7 +174,7 @@ so we don't use the command names but more generic symbols.
 
 Applying changes:
 
-  `discard' Discarding one or more changes (i.e. hunks or the
+  `discard' Discarding one or more changes (i.e., hunks or the
   complete diff for a file) loses that change, obviously.
 
   `reverse' Reverting one or more changes can usually be undone
@@ -317,6 +308,11 @@ Removing modules:
 
 Various:
 
+  `stash-apply-3way' When a stash cannot be applied using \"git
+  stash apply\", then Magit uses \"git apply\" instead, possibly
+  using the \"--3way\" argument, which isn't always perfectly
+  safe.  See also `magit-stash-apply'.
+
   `kill-process' There seldom is a reason to kill a process.
 
 Global settings:
@@ -383,6 +379,26 @@ Messages which can currently be suppressed using this option are:
   :package-version '(magit . "2.8.0")
   :group 'magit-miscellaneous
   :type '(repeat string))
+
+(defcustom magit-verbose-messages nil
+  "Whether to make certain prompts and messages more verbose.
+
+Occasionally a user suggests that a certain prompt or message
+should be more verbose, but I would prefer to keep it as-is
+because I don't think that the fact that that one user did not
+understand the existing prompt/message means that a large number
+of users would have the same difficulty, and that making it more
+verbose would actually do a disservice to users who understand
+the shorter prompt well enough.
+
+Going forward I will start offering both messages when I feel the
+suggested longer message is reasonable enough, and the value of
+this option decides which will be used.  Note that changing the
+value of this option affects all such messages and that I do not
+intend to add an option per prompt."
+  :package-version '(magit . "4.0.0")
+  :group 'magit-miscellaneous
+  :type 'boolean)
 
 (defcustom magit-ellipsis
   '((margin (?… . ">"))
@@ -455,7 +471,8 @@ and delay of your graphical environment or operating system."
 (defclass magit-file-section (magit-diff-section)
   ((keymap :initform 'magit-file-section-map)
    (source :initform nil)
-   (header :initform nil)))
+   (header :initform nil)
+   (binary :initform nil)))
 
 (defclass magit-module-section (magit-file-section)
   ((keymap :initform 'magit-module-section-map)
@@ -540,11 +557,11 @@ acts similarly to `completing-read', except for the following:
   `magit-builtin-completing-read'."
   (setq magit-completing-read--silent-default nil)
   (if-let ((dwim (and def
-                      (nth 2 (-first (pcase-lambda (`(,cmd ,re ,_))
-                                       (and (eq this-command cmd)
-                                            (or (not re)
-                                                (string-match-p re prompt))))
-                                     magit-dwim-selection)))))
+                      (nth 2 (seq-find (pcase-lambda (`(,cmd ,re ,_))
+                                         (and (eq this-command cmd)
+                                              (or (not re)
+                                                  (string-match-p re prompt))))
+                                       magit-dwim-selection)))))
       (if (eq dwim 'ask)
           (if (y-or-n-p (format "%s %s? " prompt def))
               def
@@ -734,11 +751,11 @@ This is similar to `read-string', but
   (declare (indent 2)
            (debug (form form &rest (characterp form body))))
   `(prog1 (pcase (read-char-choice
-                  (concat ,prompt
-                          (mapconcat #'identity
-                                     (list ,@(mapcar #'cadr clauses))
-                                     ", ")
-                          ,(if verbose ", or [C-g] to abort " " "))
+                  (let ((parts (nconc (list ,@(mapcar #'cadr clauses))
+                                      ,(and verbose '(list "[C-g] to abort")))))
+                    (concat ,prompt
+                            (mapconcat #'identity (butlast parts) ", ")
+                            ", or "  (car (last parts)) " "))
                   ',(mapcar #'car clauses))
             ,@(--map `(,(car it) ,@(cddr it)) clauses))
      (message "")))
@@ -757,12 +774,14 @@ ACTION is a member of option `magit-slow-confirm'."
                    discard reverse stage-all-changes unstage-all-changes)))
 
 (cl-defun magit-confirm ( action &optional prompt prompt-n noabort
-                          (items nil sitems))
+                          (items nil sitems) prompt-suffix)
   (declare (indent defun))
   (setq prompt-n (format (concat (or prompt-n prompt) "? ") (length items)))
   (setq prompt   (format (concat (or prompt (magit-confirm-make-prompt action))
                                  "? ")
                          (car items)))
+  (when prompt-suffix
+    (setq prompt (concat prompt prompt-suffix)))
   (or (cond ((and (not (eq action t))
                   (or (eq magit-no-confirm t)
                       (memq action magit-no-confirm)
@@ -785,14 +804,14 @@ ACTION is a member of option `magit-slow-confirm'."
                   items)))
       (if noabort nil (user-error "Abort"))))
 
-(defun magit-confirm-files (action files &optional prompt)
+(defun magit-confirm-files (action files &optional prompt prompt-suffix noabort)
   (when files
     (unless prompt
       (setq prompt (magit-confirm-make-prompt action)))
     (magit-confirm action
-      (concat prompt " %s")
-      (concat prompt " %i files")
-      nil files)))
+      (concat prompt " \"%s\"")
+      (concat prompt " %d files")
+      noabort files prompt-suffix)))
 
 (defun magit-confirm-make-prompt (action)
   (let ((prompt (symbol-name action)))
@@ -954,7 +973,7 @@ with the text area."
 
 This combines the benefits of `buffer-string', `buffer-substring'
 and `buffer-substring-no-properties' into one function that is
-not as painful to use as the latter.  I.e. you can write
+not as painful to use as the latter.  I.e., you can write
   (magit--buffer-string)
 instead of
   (buffer-substring-no-properties (point-min)

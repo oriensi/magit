@@ -179,11 +179,18 @@ then only after asking.  A non-nil value for REVERT is ignored if REV is
           (after-change-major-mode-hook
            (remq 'global-diff-hl-mode-enable-in-buffers
                  after-change-major-mode-hook)))
-      (delay-mode-hooks
-        (normal-mode t)))
+      (normal-mode t))
     (setq buffer-read-only t)
     (set-buffer-modified-p nil)
     (goto-char (point-min))))
+
+(defun magit--lsp--disable-when-visiting-blob (fn &rest args)
+  "Do nothing when visiting blob using `magit-find-file' and similar.
+See also https://github.com/doomemacs/doomemacs/pull/6309."
+  (unless magit-buffer-revision
+    (apply fn args)))
+
+(advice-add 'lsp :around #'magit--lsp--disable-when-visiting-blob)
 
 ;;; Find Index
 
@@ -227,8 +234,9 @@ is done using `magit-find-index-noselect'."
           (when magit-wip-after-apply-mode
             (magit-wip-commit-after-apply (list file) " after un-/stage")))
       (message "Abort")))
-  (--when-let (magit-get-mode-buffer 'magit-status-mode)
-    (with-current-buffer it (magit-refresh)))
+  (when-let ((buffer (magit-get-mode-buffer 'magit-status-mode)))
+    (with-current-buffer buffer
+      (magit-refresh)))
   t)
 
 ;;; Find Config File
@@ -289,37 +297,50 @@ directory, while reading the FILENAME."
 When invoked outside a file-visiting buffer, then fall back
 to `magit-dispatch'."
   :info-manual "(magit) Minor Mode for Buffers Visiting Files"
-  ["Actions"
-   [("s" "Stage"      magit-stage-file)
-    ("u" "Unstage"    magit-unstage-file)
-    ("c" "Commit"     magit-commit)
-    ("e" "Edit line"  magit-edit-line-commit)]
-   [("D" "Diff..."    magit-diff)
-    ("d" "Diff"       magit-diff-buffer-file)
-    ("g" "Status"     magit-status-here)]
-   [("L" "Log..."     magit-log)
+  [:if magit-file-relative-name
+   ["File actions"
+    ("  s" "Stage"    magit-stage-buffer-file)
+    ("  u" "Unstage"  magit-unstage-buffer-file)
+    (", x" "Untrack"  magit-file-untrack)
+    (", r" "Rename"   magit-file-rename)
+    (", k" "Delete"   magit-file-delete)
+    (", c" "Checkout" magit-file-checkout)]
+   ["Inspect"
+    ("D" "Diff..."    magit-diff)
+    ("d" "Diff"       magit-diff-buffer-file)]
+   [""
+    ("L" "Log..."     magit-log)
     ("l" "Log"        magit-log-buffer-file)
     ("t" "Trace"      magit-log-trace-definition)
     (7 "M" "Merged"   magit-log-merged)]
-   [("B" "Blame..."   magit-blame)
+   [""
+    ("B" "Blame..."   magit-blame)
     ("b" "Blame"      magit-blame-addition)
     ("r" "...removal" magit-blame-removal)
     ("f" "...reverse" magit-blame-reverse)
     ("m" "Blame echo" magit-blame-echo)
     ("q" "Quit blame" magit-blame-quit)]
-   [("p" "Prev blob"  magit-blob-previous)
-    ("n" "Next blob"  magit-blob-next)
-    ("v" "Goto blob"  magit-find-file)
-    ("V" "Goto file"  magit-blob-visit-file)]
-   [(5 "C-c r" "Rename file"   magit-file-rename)
-    (5 "C-c d" "Delete file"   magit-file-delete)
-    (5 "C-c u" "Untrack file"  magit-file-untrack)
-    (5 "C-c c" "Checkout file" magit-file-checkout)]]
-  (interactive)
-  (transient-setup
-   (if (magit-file-relative-name)
-       'magit-file-dispatch
-     'magit-dispatch)))
+   ["Navigate"
+    ("p" "Prev blob"   magit-blob-previous)
+    ("n" "Next blob"   magit-blob-next)
+    ("v" "Goto blob"   magit-find-file)
+    ("V" "Goto file"   magit-blob-visit-file)
+    ("g" "Goto status" magit-status-here)
+    ("G" "Goto magit"  magit-display-repository-buffer)]
+   ["More actions"
+    ("c" "Commit"     magit-commit)
+    ("e" "Edit line"  magit-edit-line-commit)]]
+  [:if-not magit-file-relative-name
+   ["File actions"
+    ("s" "Stage"    magit-stage-file)
+    ("u" "Unstage"  magit-unstage-file)
+    ("x" "Untrack"  magit-file-untrack)
+    ("r" "Rename"   magit-file-rename)
+    ("k" "Delete"   magit-file-delete)
+    ("c" "Checkout" magit-file-checkout)]
+   ["Navigate"
+    ("g" "Goto status" magit-status-here :if-not-mode magit-status-mode)
+    ("G" "Goto magit"  magit-display-repository-buffer)]])
 
 ;;; Blob Mode
 
@@ -355,8 +376,8 @@ Currently this only adds the following key bindings.
   (interactive)
   (if-let ((file (or magit-buffer-file-name
                      (buffer-file-name (buffer-base-buffer)))))
-      (--if-let (magit-blob-ancestor magit-buffer-revision file)
-          (magit-blob-visit it)
+      (if-let ((ancestor (magit-blob-ancestor magit-buffer-revision file)))
+          (magit-blob-visit ancestor)
         (user-error "You have reached the beginning of time"))
     (user-error "Buffer isn't visiting a file or blob")))
 
@@ -418,7 +439,7 @@ Git, fallback to using `rename-file'."
       (user-error "%s already exists" dstfile))
     (unless (file-exists-p dstdir)
       (user-error "Destination directory %s does not exist" dstdir))
-    (if (magit-file-tracked-p (magit-convert-filename-for-git file))
+    (if (magit-file-tracked-p file)
         (magit-call-git "mv"
                         (magit-convert-filename-for-git file)
                         (magit-convert-filename-for-git newname))
@@ -438,11 +459,10 @@ Git, fallback to using `rename-file'."
 
 With a prefix argument FORCE do so even when the files have
 staged as well as unstaged changes."
-  (interactive (list (or (--if-let (magit-region-values 'file t)
-                             (progn
-                               (unless (magit-file-tracked-p (car it))
-                                 (user-error "Already untracked"))
-                               (magit-confirm-files 'untrack it "Untrack"))
+  (interactive (list (or (if-let ((files (magit-region-values 'file t)))
+                             (if (magit-file-tracked-p (car files))
+                                 (magit-confirm-files 'untrack files "Untrack")
+                               (user-error "Already untracked"))
                            (list (magit-read-tracked-file "Untrack file"))))
                      current-prefix-arg))
   (magit-with-toplevel
@@ -454,8 +474,8 @@ staged as well as unstaged changes."
 With a prefix argument FORCE do so even when the files have
 uncommitted changes.  When the files aren't being tracked in
 Git, then fallback to using `delete-file'."
-  (interactive (list (--if-let (magit-region-values 'file t)
-                         (magit-confirm-files 'delete it "Delete")
+  (interactive (list (if-let ((files (magit-region-values 'file t)))
+                         (magit-confirm-files 'delete files "Delete")
                        (list (magit-read-file "Delete file")))
                      current-prefix-arg))
   (if (magit-file-tracked-p (car files))
@@ -486,13 +506,15 @@ Git, then fallback to using `delete-file'."
      (car (member (or default (magit-current-file)) files)))))
 
 (defun magit-read-file (prompt &optional tracked-only)
-  (let ((choices (nconc (magit-list-files)
-                        (unless tracked-only (magit-untracked-files)))))
-    (magit-completing-read
-     prompt choices nil t nil nil
-     (car (member (or (magit-section-value-if '(file submodule))
-                      (magit-file-relative-name nil tracked-only))
-                  choices)))))
+  (magit-with-toplevel
+    (let ((choices (nconc (magit-list-files)
+                          (and (not tracked-only)
+                               (magit-untracked-files)))))
+      (magit-completing-read
+       prompt choices nil t nil nil
+       (car (member (or (magit-section-value-if '(file submodule))
+                        (magit-file-relative-name nil tracked-only))
+                    choices))))))
 
 (defun magit-read-tracked-file (prompt)
   (magit-read-file prompt t))
